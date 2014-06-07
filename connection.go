@@ -110,8 +110,14 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		return validationErr
 	}
 
+	var parent *Stream
+	if frame.AssociatedToStreamId != spdy.StreamId(0) {
+		parent = s.streams[frame.AssociatedToStreamId]
+	}
+
 	stream := &Stream{
 		streamId:  frame.StreamId,
+		parent:    parent,
 		conn:      s,
 		startChan: make(chan error),
 		headers:   frame.Headers,
@@ -255,10 +261,16 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 		stream.finished = true
 	}
 
+	var parentId spdy.StreamId
+	if parent != nil {
+		parentId = parent.streamId
+	}
+
 	streamFrame := &spdy.SynStreamFrame{
-		StreamId: spdy.StreamId(streamId),
-		Headers:  headers,
-		CFHeader: spdy.ControlFrameHeader{Flags: flags},
+		StreamId:             spdy.StreamId(streamId),
+		AssociatedToStreamId: spdy.StreamId(parentId),
+		Headers:              headers,
+		CFHeader:             spdy.ControlFrameHeader{Flags: flags},
 	}
 
 	writeErr := s.framer.WriteFrame(streamFrame)

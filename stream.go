@@ -126,6 +126,16 @@ func (s *Stream) Close() error {
 	return nil
 }
 
+// CreateSubStream creates a stream using the current as the parent
+func (s *Stream) CreateSubStream(headers http.Header, fin bool) (*Stream, error) {
+	return s.conn.CreateStream(headers, s, fin)
+}
+
+// Parent returns the parent stream
+func (s *Stream) Parent() *Stream {
+	return s.parent
+}
+
 // Headers returns the headers used to create the stream
 func (s *Stream) Headers() http.Header {
 	return s.headers
