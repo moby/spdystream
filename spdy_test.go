@@ -57,6 +57,25 @@ func TestSpdyStreams(t *testing.T) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpectd: %s", buf, message)
 	}
 
+	headers := http.Header{
+		"TestKey": []string{"TestVal"},
+	}
+	sendErr := stream.SendHeader(headers, false)
+	if sendErr != nil {
+		t.Fatalf("Error sending headers: %s", sendErr)
+	}
+	receiveHeaders, receiveErr := stream.ReceiveHeader()
+	if receiveErr != nil {
+		t.Fatalf("Error receiving headers: %s", receiveErr)
+	}
+	if len(receiveHeaders) != 1 {
+		t.Fatalf("Unexpected number of headers:\nActual: %d\nExpecting:%d", len(receiveHeaders), 1)
+	}
+	testVal := receiveHeaders.Get("TestKey")
+	if testVal != "TestVal" {
+		t.Fatalf("Wrong test value:\nActual: %q\nExpecting: %q", testVal, "TestVal")
+	}
+
 	writeErr = stream.WriteData(message, true)
 	if writeErr != nil {
 		t.Fatalf("Error writing data")

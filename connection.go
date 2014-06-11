@@ -86,6 +86,8 @@ func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
 			frameErr = s.handleDataFrame(frame)
 		case *spdy.RstStreamFrame:
 			frameErr = s.handleResetFrame(frame)
+		case *spdy.HeadersFrame:
+			frameErr = s.handleHeaderFrame(frame)
 		default:
 			frameErr = fmt.Errorf("unhandled frame type: %T", frame)
 		}
@@ -116,13 +118,15 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 	}
 
 	stream := &Stream{
-		streamId:  frame.StreamId,
-		parent:    parent,
-		conn:      s,
-		startChan: make(chan error),
-		headers:   frame.Headers,
-		finished:  (frame.CFHeader.Flags & spdy.ControlFlagFin) != 0x00,
-		dataChan:  make(chan []byte),
+		streamId:   frame.StreamId,
+		parent:     parent,
+		conn:       s,
+		startChan:  make(chan error),
+		headers:    frame.Headers,
+		finished:   (frame.CFHeader.Flags & spdy.ControlFlagFin) != 0x00,
+		dataChan:   make(chan []byte),
+		headerChan: make(chan http.Header),
+		closeChan:  make(chan bool),
 	}
 
 	s.streams[frame.StreamId] = stream
@@ -182,9 +186,12 @@ func (s *Connection) handleResetFrame(frame *spdy.RstStreamFrame) error {
 		return nil
 	}
 	stream.dataLock.Lock()
-	if !stream.closed {
+	select {
+	case <-stream.closeChan:
+		break
+	default:
 		close(stream.dataChan)
-		stream.closed = true
+		close(stream.closeChan)
 	}
 	stream.dataLock.Unlock()
 
@@ -197,6 +204,29 @@ func (s *Connection) handleResetFrame(frame *spdy.RstStreamFrame) error {
 	stream.finishLock.Lock()
 	stream.finished = true
 	stream.finishLock.Unlock()
+
+	return nil
+}
+
+func (s *Connection) handleHeaderFrame(frame *spdy.HeadersFrame) error {
+	stream, streamOk := s.streams[frame.StreamId]
+	if !streamOk {
+		// Stream has already gone away
+		return nil
+	}
+	if !stream.replied {
+		// No reply received...Protocol error?
+		return nil
+	}
+
+	// TODO limit headers while not blocking (use buffered chan or goroutine?)
+	select {
+	case <-stream.closeChan:
+		return nil
+	case stream.headerChan <- frame.Headers:
+	}
+
+	// TODO handle fin header
 
 	return nil
 }
@@ -214,7 +244,10 @@ func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
 
 	if len(frame.Data) > 0 {
 		stream.dataLock.RLock()
-		if !stream.closed {
+		select {
+		case <-stream.closeChan:
+			break
+		default:
 			stream.dataChan <- frame.Data
 		}
 		stream.dataLock.RUnlock()
@@ -222,9 +255,12 @@ func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
 	if (frame.Flags & spdy.DataFlagFin) != 0x00 {
 		// synchronize closing channel
 		stream.dataLock.Lock()
-		if !stream.closed {
+		select {
+		case <-stream.closeChan:
+			break
+		default:
 			close(stream.dataChan)
-			stream.closed = true
+			close(stream.closeChan)
 		}
 		stream.dataLock.Unlock()
 	}
@@ -244,12 +280,14 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 	}
 
 	stream := &Stream{
-		streamId:  streamId,
-		parent:    parent,
-		conn:      s,
-		startChan: make(chan error),
-		headers:   headers,
-		dataChan:  make(chan []byte),
+		streamId:   streamId,
+		parent:     parent,
+		conn:       s,
+		startChan:  make(chan error),
+		headers:    headers,
+		dataChan:   make(chan []byte),
+		headerChan: make(chan http.Header),
+		closeChan:  make(chan bool),
 	}
 
 	// Add stream to map, lock not necessary since streamId will be unique
@@ -292,6 +330,21 @@ func (s *Connection) Close() error {
 		}
 	}
 	return s.conn.Close()
+}
+
+func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) error {
+	var flags spdy.ControlFlags
+	if fin {
+		flags = spdy.ControlFlagFin
+	}
+
+	headerFrame := &spdy.HeadersFrame{
+		StreamId: stream.streamId,
+		Headers:  headers,
+		CFHeader: spdy.ControlFrameHeader{Flags: flags},
+	}
+
+	return s.framer.WriteFrame(headerFrame)
 }
 
 // getNextStreamId returns the next sequential id

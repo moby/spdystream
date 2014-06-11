@@ -20,10 +20,11 @@ type Stream struct {
 	unread   []byte
 
 	headers    http.Header
+	headerChan chan http.Header
 	finishLock sync.Mutex
 	replied    bool
 	finished   bool
-	closed     bool
+	closeChan  chan bool
 }
 
 // WriteData writes data to stream, sending a dataframe per call
@@ -64,11 +65,15 @@ func (s *Stream) Write(data []byte) (n int, err error) {
 // read may get data from the same data frame.
 func (s *Stream) Read(p []byte) (n int, err error) {
 	if s.unread == nil {
-		read, ok := <-s.dataChan
-		if !ok {
+		select {
+		case <-s.closeChan:
 			return 0, io.EOF
+		case read, ok := <-s.dataChan:
+			if !ok {
+				return 0, io.EOF
+			}
+			s.unread = read
 		}
-		s.unread = read
 	}
 	n = copy(p, s.unread)
 	if n < len(s.unread) {
@@ -129,6 +134,27 @@ func (s *Stream) Close() error {
 // CreateSubStream creates a stream using the current as the parent
 func (s *Stream) CreateSubStream(headers http.Header, fin bool) (*Stream, error) {
 	return s.conn.CreateStream(headers, s, fin)
+}
+
+// SendHeader sends a header frame across the stream
+func (s *Stream) SendHeader(headers http.Header, fin bool) error {
+	return s.conn.sendHeaders(headers, s, fin)
+}
+
+// ReceiveHeader receives a header sent on the other side
+// of the stream.  This function will block until a header
+// is received or stream is closed.
+func (s *Stream) ReceiveHeader() (http.Header, error) {
+	select {
+	case <-s.closeChan:
+		break
+	case header, ok := <-s.headerChan:
+		if !ok {
+			return nil, fmt.Errorf("header chan closed")
+		}
+		return header, nil
+	}
+	return nil, fmt.Errorf("stream closed")
 }
 
 // Parent returns the parent stream
