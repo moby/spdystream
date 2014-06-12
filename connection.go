@@ -18,7 +18,7 @@ var (
 	ErrWriteClosedStream = errors.New("Write on closed stream")
 )
 
-type StreamHandler func(stream *Stream)
+type StreamHandler func(stream *Stream) http.Header
 
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
 
@@ -192,9 +192,11 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		return nil
 	}
 
+	headers := newHandler(stream)
+
 	replyFrame := &spdy.SynReplyFrame{
 		StreamId: frame.StreamId,
-		Headers:  http.Header{},
+		Headers:  headers,
 	}
 
 	writeErr := s.framer.WriteFrame(replyFrame)
@@ -203,8 +205,6 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		return writeErr
 	}
 	stream.replied = true
-
-	newHandler(stream)
 
 	return nil
 }
