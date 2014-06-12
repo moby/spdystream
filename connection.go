@@ -192,18 +192,6 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		return nil
 	}
 
-	replyFrame := &spdy.SynReplyFrame{
-		StreamId: frame.StreamId,
-		Headers:  http.Header{},
-	}
-
-	writeErr := s.framer.WriteFrame(replyFrame)
-	if writeErr != nil {
-		stream.Close()
-		return writeErr
-	}
-	stream.replied = true
-
 	newHandler(stream)
 
 	return nil
@@ -332,10 +320,10 @@ func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
 // the reply frame.  If waiting for the reply is desired, use
 // the stream Wait or WaitTimeout function on the stream returned
 // by this function.
-func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool) (*Stream, error) {
-	streamId, streamErr := s.getNextStreamId()
-	if streamErr != nil {
-		return nil, streamErr
+func (s *Connection) CreateStream(headers http.Header, parent *Stream) *Stream {
+	streamId := s.getNextStreamId()
+	if streamId == 0 {
+		return nil
 	}
 
 	stream := &Stream{
@@ -352,31 +340,7 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 	// Add stream to map, lock not necessary since streamId will be unique
 	s.streams[streamId] = stream
 
-	var flags spdy.ControlFlags
-	if fin {
-		flags = spdy.ControlFlagFin
-		stream.finished = true
-	}
-
-	var parentId spdy.StreamId
-	if parent != nil {
-		parentId = parent.streamId
-	}
-
-	streamFrame := &spdy.SynStreamFrame{
-		StreamId:             spdy.StreamId(streamId),
-		AssociatedToStreamId: spdy.StreamId(parentId),
-		Headers:              headers,
-		CFHeader:             spdy.ControlFrameHeader{Flags: flags},
-	}
-
-	writeErr := s.framer.WriteFrame(streamFrame)
-	if writeErr != nil {
-		stream.Close()
-		return nil, writeErr
-	}
-
-	return stream, nil
+	return stream
 }
 
 // Closes spdy connection, including network connection used
@@ -407,17 +371,54 @@ func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) 
 	return s.framer.WriteFrame(headerFrame)
 }
 
+func (s *Connection) sendReply(headers http.Header, stream *Stream, fin bool) error {
+	var flags spdy.ControlFlags
+	if fin {
+		flags = spdy.ControlFlagFin
+	}
+
+	replyFrame := &spdy.SynReplyFrame{
+		StreamId: stream.streamId,
+		Headers:  headers,
+		CFHeader: spdy.ControlFrameHeader{Flags: flags},
+	}
+
+	return s.framer.WriteFrame(replyFrame)
+}
+
+func (s *Connection) sendStream(stream *Stream, fin bool) error {
+	var flags spdy.ControlFlags
+	if fin {
+		flags = spdy.ControlFlagFin
+		stream.finished = true
+	}
+
+	var parentId spdy.StreamId
+	if stream.parent != nil {
+		parentId = stream.parent.streamId
+	}
+
+	streamFrame := &spdy.SynStreamFrame{
+		StreamId:             spdy.StreamId(stream.streamId),
+		AssociatedToStreamId: spdy.StreamId(parentId),
+		Headers:              stream.headers,
+		CFHeader:             spdy.ControlFrameHeader{Flags: flags},
+	}
+
+	return s.framer.WriteFrame(streamFrame)
+}
+
 // getNextStreamId returns the next sequential id
 // every call should produce a unique value or an error
-func (s *Connection) getNextStreamId() (spdy.StreamId, error) {
+func (s *Connection) getNextStreamId() spdy.StreamId {
 	s.nextIdLock.Lock()
 	defer s.nextIdLock.Unlock()
 	sid := s.nextStreamId
 	if sid > 0x7fffffff {
-		return 0, errors.New("Can't allocate new streams: uint32 overflow")
+		return 0
 	}
 	s.nextStreamId = s.nextStreamId + 2
-	return sid, nil
+	return sid
 }
 
 func (s *Connection) validateStreamId(rid spdy.StreamId) error {
