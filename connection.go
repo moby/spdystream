@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 )
 
 var (
@@ -22,8 +23,9 @@ type StreamHandler func(stream *Stream)
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
 
 type Connection struct {
-	conn   net.Conn
-	framer *spdy.Framer
+	conn      net.Conn
+	framer    *spdy.Framer
+	closeChan chan bool
 
 	streamLock sync.Mutex
 	streams    map[spdy.StreamId]*Stream
@@ -32,6 +34,10 @@ type Connection struct {
 	receiveIdLock    sync.Mutex
 	nextStreamId     spdy.StreamId
 	receivedStreamId spdy.StreamId
+
+	pingIdLock sync.Mutex
+	pingId     uint32
+	pingChans  map[uint32]chan error
 }
 
 // NewConnection creates a new spdy connection from an existing
@@ -43,24 +49,64 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 	}
 	var sid spdy.StreamId
 	var rid spdy.StreamId
+	var pid uint32
 	if server {
 		sid = 2
 		rid = 1
+		pid = 2
 	} else {
 		sid = 1
 		rid = 2
+		pid = 1
 	}
 
 	session := &Connection{
-		conn:   conn,
-		framer: framer,
+		conn:      conn,
+		framer:    framer,
+		closeChan: make(chan bool),
 
 		streams:          make(map[spdy.StreamId]*Stream),
 		nextStreamId:     sid,
 		receivedStreamId: rid,
+
+		pingId:    pid,
+		pingChans: make(map[uint32]chan error),
 	}
 
 	return session, nil
+}
+
+// Ping sends a ping frame across the connection and
+// returns the response time
+func (s *Connection) Ping() (time.Duration, error) {
+	pid := s.pingId
+	s.pingIdLock.Lock()
+	if s.pingId > 0x7ffffffe {
+		s.pingId = s.pingId - 0x7ffffffe
+	} else {
+		s.pingId = s.pingId + 2
+	}
+	s.pingIdLock.Unlock()
+	pingChan := make(chan error)
+	s.pingChans[pid] = pingChan
+	defer delete(s.pingChans, pid)
+
+	frame := &spdy.PingFrame{Id: pid}
+	startTime := time.Now()
+	writeErr := s.framer.WriteFrame(frame)
+	if writeErr != nil {
+		return time.Duration(0), writeErr
+	}
+	select {
+	case <-s.closeChan:
+		return time.Duration(0), errors.New("connection closed")
+	case err, ok := <-pingChan:
+		if ok && err != nil {
+			return time.Duration(0), err
+		}
+		break
+	}
+	return time.Now().Sub(startTime), nil
 }
 
 // Serve handles frames sent from the server, including reply frames
@@ -88,6 +134,8 @@ func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
 			frameErr = s.handleResetFrame(frame)
 		case *spdy.HeadersFrame:
 			frameErr = s.handleHeaderFrame(frame)
+		case *spdy.PingFrame:
+			frameErr = s.handlePingFrame(frame)
 		default:
 			frameErr = fmt.Errorf("unhandled frame type: %T", frame)
 		}
@@ -267,6 +315,17 @@ func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
 	return nil
 }
 
+func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
+	if s.pingId&0x01 != frame.Id&0x01 {
+		return s.framer.WriteFrame(frame)
+	}
+	pingChan, pingOk := s.pingChans[frame.Id]
+	if pingOk {
+		close(pingChan)
+	}
+	return nil
+}
+
 // CreateStream creates a new spdy stream using the parameters for
 // creating the stream frame.  The stream frame will be sent upon
 // calling this function, however this function does not wait for
@@ -329,6 +388,7 @@ func (s *Connection) Close() error {
 			return closeErr
 		}
 	}
+	close(s.closeChan)
 	return s.conn.Close()
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestSpdyStreams(t *testing.T) {
@@ -136,6 +137,40 @@ func TestSpdyStreams(t *testing.T) {
 	spdyCloseErr := spdyConn.Close()
 	if spdyCloseErr != nil {
 		t.Fatalf("Error closing spdy connection: %s", spdyCloseErr)
+	}
+
+	closeErr := server.Close()
+	if closeErr != nil {
+		t.Fatalf("Error shutting down server: %s", closeErr)
+	}
+	wg.Wait()
+}
+
+func TestPing(t *testing.T) {
+	var wg sync.WaitGroup
+	listen := "localhost:7443"
+	server, serverErr := runServer(listen, &wg)
+	if serverErr != nil {
+		t.Fatalf("Error initializing server: %s", serverErr)
+	}
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler, RejectAuthHandler)
+
+	pingTime, pingErr := spdyConn.Ping()
+	if pingErr != nil {
+		t.Fatalf("Error pinging server: %s", pingErr)
+	}
+	if pingTime == time.Duration(0) {
+		t.Fatalf("Expecting non-zero ping time")
 	}
 
 	closeErr := server.Close()
