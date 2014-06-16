@@ -120,7 +120,7 @@ func (s *Connection) Ping() (time.Duration, error) {
 // Serve handles frames sent from the server, including reply frames
 // which are needed to fully initiate connections.  Both clients and servers
 // should call Serve in a separate goroutine before creating streams.
-func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
+func (s *Connection) Serve(newHandler StreamHandler) {
 	// Parition queues to ensure stream frames are handled
 	// by the same worker, ensuring order is maintained
 	frameQueues := make([]*PriorityFrameQueue, FRAME_WORKERS)
@@ -132,7 +132,7 @@ func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
 			frameQueue.Drain()
 		}(frameQueues[i])
 
-		go s.frameHandler(frameQueues[i], newHandler, authHandler)
+		go s.frameHandler(frameQueues[i], newHandler)
 	}
 
 	var partitionRoundRobin int
@@ -175,7 +175,7 @@ func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
 	}
 }
 
-func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler StreamHandler, authHandler AuthHandler) {
+func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler StreamHandler) {
 	for {
 		popFrame := frameQueue.Pop()
 		if popFrame == nil {
@@ -185,7 +185,7 @@ func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler Str
 		var frameErr error
 		switch frame := popFrame.(type) {
 		case *spdy.SynStreamFrame:
-			frameErr = s.handleStreamFrame(frame, newHandler, authHandler)
+			frameErr = s.handleStreamFrame(frame, newHandler)
 		case *spdy.SynReplyFrame:
 			frameErr = s.handleReplyFrame(frame)
 		case *spdy.DataFrame:
@@ -216,7 +216,7 @@ func (s *Connection) getStreamPriority(streamId spdy.StreamId) uint8 {
 	return stream.priority
 }
 
-func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler, authHandler AuthHandler) error {
+func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
 	validationErr := s.validateStreamId(frame.StreamId)
 	if validationErr != nil {
 		errorFrame := &spdy.RstStreamFrame{
@@ -254,21 +254,6 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 	s.streamLock.Lock()
 	s.streams[frame.StreamId] = stream
 	s.streamLock.Unlock()
-
-	if !authHandler(frame.Headers, frame.Slot, uint32(frame.AssociatedToStreamId)) {
-		stream.Close()
-		errorFrame := &spdy.RstStreamFrame{
-			StreamId: frame.StreamId,
-			Status:   spdy.RefusedStream,
-		}
-		s.writeLock.Lock()
-		writeErr := s.framer.WriteFrame(errorFrame)
-		s.writeLock.Unlock()
-		if writeErr != nil {
-			return writeErr
-		}
-		return nil
-	}
 
 	newHandler(stream)
 
@@ -477,6 +462,17 @@ func (s *Connection) sendReply(headers http.Header, stream *Stream, fin bool) er
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
 	return s.framer.WriteFrame(replyFrame)
+}
+
+func (s *Connection) sendReset(status spdy.RstStreamStatus, stream *Stream) error {
+	resetFrame := &spdy.RstStreamFrame{
+		StreamId: stream.streamId,
+		Status:   status,
+	}
+
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+	return s.framer.WriteFrame(resetFrame)
 }
 
 func (s *Connection) sendStream(stream *Stream, fin bool) error {

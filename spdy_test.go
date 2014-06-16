@@ -27,7 +27,7 @@ func TestSpdyStreams(t *testing.T) {
 	if spdyErr != nil {
 		t.Fatalf("Error creating spdy connection: %s", spdyErr)
 	}
-	go spdyConn.Serve(NoOpStreamHandler, RejectAuthHandler)
+	go spdyConn.Serve(NoOpStreamHandler)
 
 	authenticated = true
 	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
@@ -163,7 +163,7 @@ func TestPing(t *testing.T) {
 	if spdyErr != nil {
 		t.Fatalf("Error creating spdy connection: %s", spdyErr)
 	}
-	go spdyConn.Serve(NoOpStreamHandler, RejectAuthHandler)
+	go spdyConn.Serve(NoOpStreamHandler)
 
 	pingTime, pingErr := spdyConn.Ping()
 	if pingErr != nil {
@@ -182,8 +182,11 @@ func TestPing(t *testing.T) {
 
 var authenticated bool
 
-func authStreamHandler(header http.Header, slot uint8, parent uint32) bool {
-	return authenticated
+func authStreamHandler(stream *Stream) {
+	if !authenticated {
+		stream.Refuse()
+	}
+	MirrorStreamHandler(stream)
 }
 
 func runServer(listen string, wg *sync.WaitGroup) (io.Closer, error) {
@@ -200,7 +203,7 @@ func runServer(listen string, wg *sync.WaitGroup) (io.Closer, error) {
 			}
 
 			spdyConn, _ := NewConnection(conn, true)
-			go spdyConn.Serve(MirrorStreamHandler, authStreamHandler)
+			go spdyConn.Serve(authStreamHandler)
 
 		}
 		wg.Done()
