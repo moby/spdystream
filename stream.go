@@ -146,12 +146,33 @@ func (s *Stream) SendHeader(headers http.Header, fin bool) error {
 	return s.conn.sendHeaders(headers, s, fin)
 }
 
+// SendReply sends a reply on a stream, only valid to be called once
+// when handling a new stream
 func (s *Stream) SendReply(headers http.Header, fin bool) error {
 	if s.replied {
 		return nil
 	}
 	s.replied = true
 	return s.conn.sendReply(headers, s, fin)
+}
+
+// Refuse sends a reset frame with the status refuse, only
+// valid to be called once when handling a new stream.  This
+// may be used to indicate that a stream is not allowed
+// when http status codes are not being used.
+func (s *Stream) Refuse() error {
+	if s.replied {
+		return nil
+	}
+	s.replied = true
+	return s.conn.sendReset(spdy.RefusedStream, s)
+}
+
+// Cancel sends a reset frame with the status canceled. This
+// can be used at any time by the creator of the Stream to
+// indicate the stream is no longer needed.
+func (s *Stream) Cancel() error {
+	return s.conn.sendReset(spdy.Cancel, s)
 }
 
 // ReceiveHeader receives a header sent on the other side

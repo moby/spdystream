@@ -24,7 +24,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	go spdyConn.Serve(spdystream.NoOpStreamHandler, spdystream.RejectAuthHandler)
+	go spdyConn.Serve(spdystream.NoOpStreamHandler)
 	stream := spdyConn.CreateStream(http.Header{}, nil)
 	err = stream.Open(false)
 	if err != nil {
@@ -66,7 +66,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		go spdyConn.Serve(spdystream.MirrorStreamHandler, spdystream.NoAuthHandler)
+		go spdyConn.Serve(spdystream.MirrorStreamHandler)
 	}
 }
 ~~~~

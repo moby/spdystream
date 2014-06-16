@@ -36,13 +36,3 @@ func MirrorStreamHandler(stream *Stream) {
 func NoOpStreamHandler(stream *Stream) {
 	stream.SendReply(http.Header{}, false)
 }
-
-// NoAuthHandler skips authentication.
-func NoAuthHandler(header http.Header, slot uint8, parent uint32) bool {
-	return true
-}
-
-// RejectAuthHandler rejects all remotely initiated connections.
-func RejectAuthHandler(header http.Header, slot uint8, parent uint32) bool {
-	return false
-}
