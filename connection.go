@@ -408,10 +408,10 @@ func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
 // the reply frame.  If waiting for the reply is desired, use
 // the stream Wait or WaitTimeout function on the stream returned
 // by this function.
-func (s *Connection) CreateStream(headers http.Header, parent *Stream) *Stream {
+func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool) (*Stream, error) {
 	streamId := s.getNextStreamId()
 	if streamId == 0 {
-		return nil
+		return nil, fmt.Errorf("Unable to get new stream id")
 	}
 
 	stream := &Stream{
@@ -429,7 +429,7 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream) *Stream {
 	s.streams[streamId] = stream
 	s.streamLock.Unlock()
 
-	return stream
+	return stream, s.sendStream(stream, fin)
 }
 
 // Closes spdy connection, including network connection used

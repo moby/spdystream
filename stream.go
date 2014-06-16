@@ -129,19 +129,8 @@ func (s *Stream) Close() error {
 }
 
 // CreateSubStream creates a stream using the current as the parent
-func (s *Stream) CreateSubStream(headers http.Header) *Stream {
-	return s.conn.CreateStream(headers, s)
-}
-
-// Opens sends the stream frame, does not wait for reply frame.
-// Calling multiple times will result in a protocol error
-func (s *Stream) Open(fin bool) error {
-	if s == nil {
-		return fmt.Errorf("Attempt to open nil stream")
-	}
-
-	return s.conn.sendStream(s, fin)
-
+func (s *Stream) CreateSubStream(headers http.Header, fin bool) (*Stream, error) {
+	return s.conn.CreateStream(headers, s, fin)
 }
 
 // SetPriority sets the stream priority, does not affect the
