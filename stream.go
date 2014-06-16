@@ -124,21 +124,34 @@ func (s *Stream) Close() error {
 		StreamId: s.streamId,
 		Status:   spdy.Cancel,
 	}
-	writeErr := s.conn.framer.WriteFrame(resetFrame)
-	if writeErr != nil {
-		return writeErr
-	}
-	return nil
+	return s.conn.framer.WriteFrame(resetFrame)
 }
 
 // CreateSubStream creates a stream using the current as the parent
-func (s *Stream) CreateSubStream(headers http.Header, fin bool) (*Stream, error) {
-	return s.conn.CreateStream(headers, s, fin)
+func (s *Stream) CreateSubStream(headers http.Header) *Stream {
+	return s.conn.CreateStream(headers, s)
+}
+
+func (s *Stream) Open(fin bool) error {
+	if s == nil {
+		return fmt.Errorf("Attempt to open nil stream")
+	}
+
+	return s.conn.sendStream(s, fin)
+
 }
 
 // SendHeader sends a header frame across the stream
 func (s *Stream) SendHeader(headers http.Header, fin bool) error {
 	return s.conn.sendHeaders(headers, s, fin)
+}
+
+func (s *Stream) SendReply(headers http.Header, fin bool) error {
+	if s.replied {
+		return nil
+	}
+	s.replied = true
+	return s.conn.sendReply(headers, s, fin)
 }
 
 // ReceiveHeader receives a header sent on the other side

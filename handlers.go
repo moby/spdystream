@@ -7,6 +7,11 @@ import (
 
 // MirrorStreamHandler mirrors all streams.
 func MirrorStreamHandler(stream *Stream) {
+	replyErr := stream.SendReply(http.Header{}, false)
+	if replyErr != nil {
+		return
+	}
+
 	go func() {
 		io.Copy(stream, stream)
 		stream.Close()
@@ -28,7 +33,9 @@ func MirrorStreamHandler(stream *Stream) {
 // NoopStreamHandler does nothing when stream connects, most
 // likely used with RejectAuthHandler which will not allow any
 // streams to make it to the stream handler.
-func NoOpStreamHandler(stream *Stream) {}
+func NoOpStreamHandler(stream *Stream) {
+	stream.SendReply(http.Header{}, false)
+}
 
 // NoAuthHandler skips authentication.
 func NoAuthHandler(header http.Header, slot uint8, parent uint32) bool {
