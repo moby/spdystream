@@ -25,9 +25,10 @@ type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
 type Connection struct {
 	conn      net.Conn
 	framer    *spdy.Framer
+	writeLock sync.Mutex
 	closeChan chan bool
 
-	streamLock sync.Mutex
+	streamLock sync.RWMutex
 	streams    map[spdy.StreamId]*Stream
 
 	nextIdLock       sync.Mutex
@@ -93,7 +94,9 @@ func (s *Connection) Ping() (time.Duration, error) {
 
 	frame := &spdy.PingFrame{Id: pid}
 	startTime := time.Now()
+	s.writeLock.Lock()
 	writeErr := s.framer.WriteFrame(frame)
+	s.writeLock.Unlock()
 	if writeErr != nil {
 		return time.Duration(0), writeErr
 	}
@@ -153,7 +156,9 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 			StreamId: frame.StreamId,
 			Status:   spdy.ProtocolError,
 		}
+		s.writeLock.Lock()
 		writeErr := s.framer.WriteFrame(errorFrame)
+		s.writeLock.Unlock()
 		if writeErr != nil {
 			return writeErr
 		}
@@ -162,7 +167,9 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 
 	var parent *Stream
 	if frame.AssociatedToStreamId != spdy.StreamId(0) {
+		s.streamLock.RLock()
 		parent = s.streams[frame.AssociatedToStreamId]
+		s.streamLock.RUnlock()
 	}
 
 	stream := &Stream{
@@ -177,7 +184,9 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		closeChan:  make(chan bool),
 	}
 
+	s.streamLock.Lock()
 	s.streams[frame.StreamId] = stream
+	s.streamLock.Unlock()
 
 	if !authHandler(frame.Headers, frame.Slot, uint32(frame.AssociatedToStreamId)) {
 		stream.Close()
@@ -185,7 +194,9 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 			StreamId: frame.StreamId,
 			Status:   spdy.RefusedStream,
 		}
+		s.writeLock.Lock()
 		writeErr := s.framer.WriteFrame(errorFrame)
+		s.writeLock.Unlock()
 		if writeErr != nil {
 			return writeErr
 		}
@@ -198,7 +209,9 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 }
 
 func (s *Connection) handleReplyFrame(frame *spdy.SynReplyFrame) error {
+	s.streamLock.RLock()
 	stream, streamOk := s.streams[frame.StreamId]
+	s.streamLock.RUnlock()
 	if !streamOk {
 		// Stream has already gone away
 		return nil
@@ -216,7 +229,9 @@ func (s *Connection) handleReplyFrame(frame *spdy.SynReplyFrame) error {
 }
 
 func (s *Connection) handleResetFrame(frame *spdy.RstStreamFrame) error {
+	s.streamLock.RLock()
 	stream, streamOk := s.streams[frame.StreamId]
+	s.streamLock.RUnlock()
 	if !streamOk {
 		// Stream has already gone away
 		return nil
@@ -245,7 +260,9 @@ func (s *Connection) handleResetFrame(frame *spdy.RstStreamFrame) error {
 }
 
 func (s *Connection) handleHeaderFrame(frame *spdy.HeadersFrame) error {
+	s.streamLock.RLock()
 	stream, streamOk := s.streams[frame.StreamId]
+	s.streamLock.RUnlock()
 	if !streamOk {
 		// Stream has already gone away
 		return nil
@@ -268,7 +285,9 @@ func (s *Connection) handleHeaderFrame(frame *spdy.HeadersFrame) error {
 }
 
 func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
+	s.streamLock.RLock()
 	stream, streamOk := s.streams[frame.StreamId]
+	s.streamLock.RUnlock()
 	if !streamOk {
 		// Stream has already gone away
 		return nil
@@ -305,6 +324,8 @@ func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
 
 func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
 	if s.pingId&0x01 != frame.Id&0x01 {
+		s.writeLock.Lock()
+		defer s.writeLock.Unlock()
 		return s.framer.WriteFrame(frame)
 	}
 	pingChan, pingOk := s.pingChans[frame.Id]
@@ -337,8 +358,9 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream) *Stream {
 		closeChan:  make(chan bool),
 	}
 
-	// Add stream to map, lock not necessary since streamId will be unique
+	s.streamLock.Lock()
 	s.streams[streamId] = stream
+	s.streamLock.Unlock()
 
 	return stream
 }
@@ -368,6 +390,8 @@ func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) 
 		CFHeader: spdy.ControlFrameHeader{Flags: flags},
 	}
 
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
 	return s.framer.WriteFrame(headerFrame)
 }
 
@@ -383,6 +407,8 @@ func (s *Connection) sendReply(headers http.Header, stream *Stream, fin bool) er
 		CFHeader: spdy.ControlFrameHeader{Flags: flags},
 	}
 
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
 	return s.framer.WriteFrame(replyFrame)
 }
 
@@ -405,6 +431,8 @@ func (s *Connection) sendStream(stream *Stream, fin bool) error {
 		CFHeader:             spdy.ControlFrameHeader{Flags: flags},
 	}
 
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
 	return s.framer.WriteFrame(streamFrame)
 }
 
@@ -432,5 +460,7 @@ func (s *Connection) validateStreamId(rid spdy.StreamId) error {
 }
 
 func (s *Connection) removeStream(stream *Stream) {
+	s.streamLock.Lock()
 	delete(s.streams, stream.streamId)
+	s.streamLock.Unlock()
 }
