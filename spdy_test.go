@@ -30,8 +30,7 @@ func TestSpdyStreams(t *testing.T) {
 	go spdyConn.Serve(NoOpStreamHandler, RejectAuthHandler)
 
 	authenticated = true
-	stream := spdyConn.CreateStream(http.Header{}, nil)
-	streamErr := stream.Open(false)
+	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 	if streamErr != nil {
 		t.Fatalf("Error creating stream: %s", streamErr)
 	}
@@ -122,8 +121,7 @@ func TestSpdyStreams(t *testing.T) {
 	}
 
 	authenticated = false
-	badStream := spdyConn.CreateStream(http.Header{}, nil)
-	badStreamErr := badStream.Open(false)
+	badStream, badStreamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 	if badStreamErr != nil {
 		t.Fatalf("Error creating stream: %s", badStreamErr)
 	}
