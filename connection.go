@@ -18,6 +18,11 @@ var (
 	ErrWriteClosedStream = errors.New("Write on closed stream")
 )
 
+const (
+	FRAME_WORKERS = 5
+	QUEUE_SIZE    = 50
+)
+
 type StreamHandler func(stream *Stream)
 
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
@@ -116,6 +121,21 @@ func (s *Connection) Ping() (time.Duration, error) {
 // which are needed to fully initiate connections.  Both clients and servers
 // should call Serve in a separate goroutine before creating streams.
 func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
+	// Parition queues to ensure stream frames are handled
+	// by the same worker, ensuring order is maintained
+	frameQueues := make([]*PriorityFrameQueue, FRAME_WORKERS)
+	for i := 0; i < FRAME_WORKERS; i++ {
+		frameQueues[i] = NewPriorityFrameQueue(QUEUE_SIZE)
+		// Ensure frame queue is drained when connection is closed
+		go func(frameQueue *PriorityFrameQueue) {
+			<-s.closeChan
+			frameQueue.Drain()
+		}(frameQueues[i])
+
+		go s.frameHandler(frameQueues[i], newHandler, authHandler)
+	}
+
+	var partitionRoundRobin int
 	for {
 		readFrame, err := s.framer.ReadFrame()
 		if err != nil {
@@ -124,9 +144,46 @@ func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
 			}
 			break
 		}
+		var priority uint8
+		var partition int
+		switch frame := readFrame.(type) {
+		case *spdy.SynStreamFrame:
+			priority = frame.Priority
+			partition = int(frame.StreamId % FRAME_WORKERS)
+		case *spdy.SynReplyFrame:
+			priority = s.getStreamPriority(frame.StreamId)
+			partition = int(frame.StreamId % FRAME_WORKERS)
+		case *spdy.DataFrame:
+			priority = s.getStreamPriority(frame.StreamId)
+			partition = int(frame.StreamId % FRAME_WORKERS)
+		case *spdy.RstStreamFrame:
+			priority = s.getStreamPriority(frame.StreamId)
+			partition = int(frame.StreamId % FRAME_WORKERS)
+		case *spdy.HeadersFrame:
+			priority = s.getStreamPriority(frame.StreamId)
+			partition = int(frame.StreamId % FRAME_WORKERS)
+		case *spdy.PingFrame:
+			priority = 0
+			partition = partitionRoundRobin
+			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
+		default:
+			priority = 7
+			partition = partitionRoundRobin
+			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
+		}
+		frameQueues[partition].Push(readFrame, priority)
+	}
+}
+
+func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler StreamHandler, authHandler AuthHandler) {
+	for {
+		popFrame := frameQueue.Pop()
+		if popFrame == nil {
+			return
+		}
 
 		var frameErr error
-		switch frame := readFrame.(type) {
+		switch frame := popFrame.(type) {
 		case *spdy.SynStreamFrame:
 			frameErr = s.handleStreamFrame(frame, newHandler, authHandler)
 		case *spdy.SynReplyFrame:
@@ -147,6 +204,16 @@ func (s *Connection) Serve(newHandler StreamHandler, authHandler AuthHandler) {
 			fmt.Errorf("frame handling error: %s", frameErr)
 		}
 	}
+}
+
+func (s *Connection) getStreamPriority(streamId spdy.StreamId) uint8 {
+	s.streamLock.RLock()
+	stream, streamOk := s.streams[streamId]
+	s.streamLock.RUnlock()
+	if !streamOk {
+		return 7
+	}
+	return stream.priority
 }
 
 func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler, authHandler AuthHandler) error {

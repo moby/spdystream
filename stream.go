@@ -19,6 +19,7 @@ type Stream struct {
 	dataChan chan []byte
 	unread   []byte
 
+	priority   uint8
 	headers    http.Header
 	headerChan chan http.Header
 	finishLock sync.Mutex
@@ -132,6 +133,8 @@ func (s *Stream) CreateSubStream(headers http.Header) *Stream {
 	return s.conn.CreateStream(headers, s)
 }
 
+// Opens sends the stream frame, does not wait for reply frame.
+// Calling multiple times will result in a protocol error
 func (s *Stream) Open(fin bool) error {
 	if s == nil {
 		return fmt.Errorf("Attempt to open nil stream")
@@ -139,6 +142,14 @@ func (s *Stream) Open(fin bool) error {
 
 	return s.conn.sendStream(s, fin)
 
+}
+
+// SetPriority sets the stream priority, does not affect the
+// remote priority of this stream after Open has been called.
+// Valid values are 0 through 7, 0 being the highest priority
+// and 7 the lowest.
+func (s *Stream) SetPriority(priority uint8) {
+	s.priority = priority
 }
 
 // SendHeader sends a header frame across the stream
