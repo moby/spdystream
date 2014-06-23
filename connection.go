@@ -245,10 +245,14 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		conn:       s,
 		startChan:  make(chan error),
 		headers:    frame.Headers,
-		finished:   (frame.CFHeader.Flags & spdy.ControlFlagFin) != 0x00,
+		finished:   (frame.CFHeader.Flags & spdy.ControlFlagUnidirectional) != 0x00,
 		dataChan:   make(chan []byte),
 		headerChan: make(chan http.Header),
 		closeChan:  make(chan bool),
+	}
+	if frame.CFHeader.Flags&spdy.ControlFlagFin != 0x00 {
+		close(stream.startChan)
+		close(stream.dataChan)
 	}
 
 	s.streamLock.Lock()
@@ -274,7 +278,11 @@ func (s *Connection) handleReplyFrame(frame *spdy.SynReplyFrame) error {
 	}
 	stream.replied = true
 
-	// TODO Check for error or fin
+	// TODO Check for error
+	if (frame.CFHeader.Flags & spdy.ControlFlagFin) != 0x00 {
+		s.remoteStreamFinish(stream)
+	}
+
 	close(stream.startChan)
 
 	return nil
@@ -331,7 +339,9 @@ func (s *Connection) handleHeaderFrame(frame *spdy.HeadersFrame) error {
 	case stream.headerChan <- frame.Headers:
 	}
 
-	// TODO handle fin header
+	if (frame.CFHeader.Flags & spdy.ControlFlagFin) != 0x00 {
+		s.remoteStreamFinish(stream)
+	}
 
 	return nil
 }
@@ -360,16 +370,7 @@ func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
 		stream.dataLock.RUnlock()
 	}
 	if (frame.Flags & spdy.DataFlagFin) != 0x00 {
-		// synchronize closing channel
-		stream.dataLock.Lock()
-		select {
-		case <-stream.closeChan:
-			break
-		default:
-			close(stream.dataChan)
-			close(stream.closeChan)
-		}
-		stream.dataLock.Unlock()
+		s.remoteStreamFinish(stream)
 	}
 	return nil
 }
@@ -385,6 +386,26 @@ func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
 		close(pingChan)
 	}
 	return nil
+}
+
+func (s *Connection) remoteStreamFinish(stream *Stream) {
+	// synchronize closing channel
+	stream.dataLock.Lock()
+	select {
+	case <-stream.closeChan:
+		break
+	default:
+		close(stream.dataChan)
+		close(stream.closeChan)
+	}
+	stream.dataLock.Unlock()
+
+	stream.finishLock.Lock()
+	if stream.finished {
+		// Stream is fully closed, cleanup
+		s.removeStream(stream)
+	}
+	stream.finishLock.Unlock()
 }
 
 // CreateStream creates a new spdy stream using the parameters for
@@ -420,10 +441,11 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 // Closes spdy connection, including network connection used
 // to create the spdy connection.
 func (s *Connection) Close() error {
+	// TODO send GOAWAY
 	for _, stream := range s.streams {
-		closeErr := stream.Close()
-		if closeErr != nil {
-			return closeErr
+		resetErr := stream.Reset()
+		if resetErr != nil {
+			return resetErr
 		}
 	}
 	close(s.closeChan)

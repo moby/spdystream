@@ -109,15 +109,18 @@ func TestSpdyStreams(t *testing.T) {
 		t.Fatalf("Expected EOF reading from finished stream, read %d bytes", n)
 	}
 
+	// Closing again should return error since stream is already closed
 	streamCloseErr := stream.Close()
-	if streamCloseErr != nil {
-		t.Fatalf("Error closing stream: %s", streamCloseErr)
+	if streamCloseErr == nil {
+		t.Fatalf("No error closing finished stream")
+	}
+	if streamCloseErr != ErrWriteClosedStream {
+		t.Fatalf("Unexpected error closing stream: %s", streamCloseErr)
 	}
 
-	// Closing again should return nil
-	streamCloseErr = stream.Close()
-	if streamCloseErr != nil {
-		t.Fatalf("Error closing stream: %s", streamCloseErr)
+	streamResetErr := stream.Reset()
+	if streamResetErr != nil {
+		t.Fatalf("Error reseting stream: %s", streamResetErr)
 	}
 
 	authenticated = false
