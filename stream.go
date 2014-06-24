@@ -112,10 +112,23 @@ func (s *Stream) WaitTimeout(timeout time.Duration) error {
 	return nil
 }
 
-// Close closes the stream by sending a reset stream frame, indicating
-// this side is finished with the stream and the other side should close.
+// Close closes the stream by sending an empty data frame with the
+// finish flag set, indicating this side is finished with the stream.
 func (s *Stream) Close() error {
+	select {
+	case <-s.closeChan:
+		// Stream is now fully closed
+		s.conn.removeStream(s)
+	default:
+		break
+	}
+	return s.WriteData([]byte{}, true)
+}
+
+// Reset sends a reset frame, putting the stream into the fully closed state.
+func (s *Stream) Reset() error {
 	s.conn.removeStream(s)
+
 	s.finishLock.Lock()
 	if s.finished {
 		s.finishLock.Unlock()
@@ -123,6 +136,17 @@ func (s *Stream) Close() error {
 	}
 	s.finished = true
 	s.finishLock.Unlock()
+
+	s.dataLock.Lock()
+	select {
+	case <-s.closeChan:
+		break
+	default:
+		close(s.dataChan)
+		close(s.closeChan)
+	}
+	s.dataLock.Unlock()
+
 	resetFrame := &spdy.RstStreamFrame{
 		StreamId: s.streamId,
 		Status:   spdy.Cancel,
