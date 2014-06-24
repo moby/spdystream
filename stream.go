@@ -4,6 +4,7 @@ import (
 	"code.google.com/p/go.net/spdy"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -239,4 +240,28 @@ func (s *Stream) String() string {
 // sending data
 func (s *Stream) IsFinished() bool {
 	return s.finished
+}
+
+// Implement net.Conn interface
+
+func (s *Stream) LocalAddr() net.Addr {
+	return s.conn.conn.LocalAddr()
+}
+
+func (s *Stream) RemoteAddr() net.Addr {
+	return s.conn.conn.RemoteAddr()
+}
+
+// TODO set per stream values instead of connection-wide
+
+func (s *Stream) SetDeadline(t time.Time) error {
+	return s.conn.conn.SetDeadline(t)
+}
+
+func (s *Stream) SetReadDeadline(t time.Time) error {
+	return s.conn.conn.SetReadDeadline(t)
+}
+
+func (s *Stream) SetWriteDeadline(t time.Time) error {
+	return s.conn.conn.SetWriteDeadline(t)
 }
