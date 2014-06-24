@@ -251,8 +251,8 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		closeChan:  make(chan bool),
 	}
 	if frame.CFHeader.Flags&spdy.ControlFlagFin != 0x00 {
-		close(stream.startChan)
 		close(stream.dataChan)
+		close(stream.closeChan)
 	}
 
 	s.streamLock.Lock()
