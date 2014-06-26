@@ -148,8 +148,10 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 		var partition int
 		switch frame := readFrame.(type) {
 		case *spdy.SynStreamFrame:
-			priority = frame.Priority
-			partition = int(frame.StreamId % FRAME_WORKERS)
+			if s.checkStreamFrame(frame) {
+				priority = frame.Priority
+				partition = int(frame.StreamId % FRAME_WORKERS)
+			}
 		case *spdy.SynReplyFrame:
 			priority = s.getStreamPriority(frame.StreamId)
 			partition = int(frame.StreamId % FRAME_WORKERS)
@@ -216,22 +218,26 @@ func (s *Connection) getStreamPriority(streamId spdy.StreamId) uint8 {
 	return stream.priority
 }
 
-func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
+// checkStreamFrame checks to see if a stream frame is allowed.
+// If the stream is invalid, then a reset frame with protocol error
+// will be returned.
+func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
+	s.receiveIdLock.Lock()
+	defer s.receiveIdLock.Unlock()
 	validationErr := s.validateStreamId(frame.StreamId)
 	if validationErr != nil {
-		errorFrame := &spdy.RstStreamFrame{
-			StreamId: frame.StreamId,
-			Status:   spdy.ProtocolError,
-		}
-		s.writeLock.Lock()
-		writeErr := s.framer.WriteFrame(errorFrame)
-		s.writeLock.Unlock()
-		if writeErr != nil {
-			return writeErr
-		}
-		return validationErr
+		go func() {
+			resetErr := s.sendResetFrame(spdy.ProtocolError, frame.StreamId)
+			if resetErr != nil {
+				fmt.Errorf("reset error: %s", resetErr)
+			}
+		}()
+		return false
 	}
+	return true
+}
 
+func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
 	var parent *Stream
 	if frame.AssociatedToStreamId != spdy.StreamId(0) {
 		s.streamLock.RLock()
@@ -486,15 +492,19 @@ func (s *Connection) sendReply(headers http.Header, stream *Stream, fin bool) er
 	return s.framer.WriteFrame(replyFrame)
 }
 
-func (s *Connection) sendReset(status spdy.RstStreamStatus, stream *Stream) error {
+func (s *Connection) sendResetFrame(status spdy.RstStreamStatus, streamId spdy.StreamId) error {
 	resetFrame := &spdy.RstStreamFrame{
-		StreamId: stream.streamId,
+		StreamId: streamId,
 		Status:   status,
 	}
 
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
 	return s.framer.WriteFrame(resetFrame)
+}
+
+func (s *Connection) sendReset(status spdy.RstStreamStatus, stream *Stream) error {
+	return s.sendResetFrame(status, stream.streamId)
 }
 
 func (s *Connection) sendStream(stream *Stream, fin bool) error {
@@ -535,8 +545,6 @@ func (s *Connection) getNextStreamId() spdy.StreamId {
 }
 
 func (s *Connection) validateStreamId(rid spdy.StreamId) error {
-	s.receiveIdLock.Lock()
-	defer s.receiveIdLock.Unlock()
 	if rid > 0x7fffffff || rid < s.receivedStreamId {
 		return ErrInvalidStreamId
 	}
