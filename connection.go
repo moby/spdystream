@@ -687,3 +687,19 @@ func (s *Connection) getStream(streamId spdy.StreamId) (stream *Stream, ok bool)
 	s.streamLock.RUnlock()
 	return
 }
+
+// FindStream looks up the given stream id and either waits for the
+// stream to be found or returns nil if the stream id is no longer
+// valid.
+func (s *Connection) FindStream(streamId uint32) *Stream {
+	var stream *Stream
+	var ok bool
+	s.streamCond.L.Lock()
+	stream, ok = s.streams[spdy.StreamId(streamId)]
+	for !ok && streamId >= uint32(s.receivedStreamId) {
+		s.streamCond.Wait()
+		stream, ok = s.streams[spdy.StreamId(streamId)]
+	}
+	s.streamCond.L.Unlock()
+	return stream
+}

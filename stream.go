@@ -283,6 +283,11 @@ func (s *Stream) String() string {
 	return fmt.Sprintf("stream:%d", s.streamId)
 }
 
+// Identifier returns a 32 bit identifier for the stream
+func (s *Stream) Identifier() uint32 {
+	return uint32(s.streamId)
+}
+
 // IsFinished returns whether the stream has finished
 // sending data
 func (s *Stream) IsFinished() bool {
