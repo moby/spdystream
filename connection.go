@@ -165,6 +165,9 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			if s.checkStreamFrame(frame) {
 				priority = frame.Priority
 				partition = int(frame.StreamId % FRAME_WORKERS)
+				s.addStreamFrame(frame)
+			} else {
+				continue
 			}
 		case *spdy.SynReplyFrame:
 			priority = s.getStreamPriority(frame.StreamId)
@@ -241,29 +244,7 @@ func (s *Connection) getStreamPriority(streamId spdy.StreamId) uint8 {
 	return stream.priority
 }
 
-// checkStreamFrame checks to see if a stream frame is allowed.
-// If the stream is invalid, then a reset frame with protocol error
-// will be returned.
-func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
-	s.receiveIdLock.Lock()
-	defer s.receiveIdLock.Unlock()
-	if s.goneAway {
-		return false
-	}
-	validationErr := s.validateStreamId(frame.StreamId)
-	if validationErr != nil {
-		go func() {
-			resetErr := s.sendResetFrame(spdy.ProtocolError, frame.StreamId)
-			if resetErr != nil {
-				fmt.Errorf("reset error: %s", resetErr)
-			}
-		}()
-		return false
-	}
-	return true
-}
-
-func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
+func (s *Connection) addStreamFrame(frame *spdy.SynStreamFrame) {
 	var parent *Stream
 	if frame.AssociatedToStreamId != spdy.StreamId(0) {
 		parent, _ = s.getStream(frame.AssociatedToStreamId)
@@ -287,6 +268,35 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 	}
 
 	s.addStream(stream)
+}
+
+// checkStreamFrame checks to see if a stream frame is allowed.
+// If the stream is invalid, then a reset frame with protocol error
+// will be returned.
+func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
+	s.receiveIdLock.Lock()
+	defer s.receiveIdLock.Unlock()
+	if s.goneAway {
+		return false
+	}
+	validationErr := s.validateStreamId(frame.StreamId)
+	if validationErr != nil {
+		go func() {
+			resetErr := s.sendResetFrame(spdy.ProtocolError, frame.StreamId)
+			if resetErr != nil {
+				fmt.Errorf("reset error: %s", resetErr)
+			}
+		}()
+		return false
+	}
+	return true
+}
+
+func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
+	stream, ok := s.getStream(frame.StreamId)
+	if !ok {
+		return fmt.Errorf("Missing stream: %d", frame.StreamId)
+	}
 
 	newHandler(stream)
 
