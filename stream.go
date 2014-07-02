@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+var (
+	ErrUnreadPartialData = errors.New("unread partial data")
+)
+
 type Stream struct {
 	streamId  spdy.StreamId
 	parent    *Stream
@@ -89,6 +93,24 @@ func (s *Stream) Read(p []byte) (n int, err error) {
 		s.unread = nil
 	}
 	return
+}
+
+// ReadData reads an entire data frame and returns the byte array
+// from the data frame.  If there is unread data from the result
+// of a Read call, this function will return an ErrUnreadPartialData.
+func (s *Stream) ReadData() ([]byte, error) {
+	if s.unread != nil {
+		return nil, ErrUnreadPartialData
+	}
+	select {
+	case <-s.closeChan:
+		return nil, io.EOF
+	case read, ok := <-s.dataChan:
+		if !ok {
+			return nil, io.EOF
+		}
+		return read, nil
+	}
 }
 
 func (s *Stream) waitWriteReply() {
