@@ -2,6 +2,7 @@ package spdystream
 
 import (
 	"code.google.com/p/go.net/spdy"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -24,13 +25,15 @@ type Stream struct {
 	headers    http.Header
 	headerChan chan http.Header
 	finishLock sync.Mutex
-	replied    bool
 	finished   bool
+	replyCond  *sync.Cond
+	replied    bool
 	closeChan  chan bool
 }
 
 // WriteData writes data to stream, sending a dataframe per call
 func (s *Stream) WriteData(data []byte, fin bool) error {
+	s.waitWriteReply()
 	var flags spdy.DataFlags
 
 	if fin {
@@ -86,6 +89,16 @@ func (s *Stream) Read(p []byte) (n int, err error) {
 		s.unread = nil
 	}
 	return
+}
+
+func (s *Stream) waitWriteReply() {
+	if s.replyCond != nil {
+		s.replyCond.L.Lock()
+		for !s.replied {
+			s.replyCond.Wait()
+		}
+		s.replyCond.L.Unlock()
+	}
 }
 
 // Wait waits for the stream to receive a reply.
@@ -178,11 +191,23 @@ func (s *Stream) SendHeader(headers http.Header, fin bool) error {
 // SendReply sends a reply on a stream, only valid to be called once
 // when handling a new stream
 func (s *Stream) SendReply(headers http.Header, fin bool) error {
+	if s.replyCond == nil {
+		return errors.New("cannot reply on initiated stream")
+	}
+	s.replyCond.L.Lock()
+	defer s.replyCond.L.Unlock()
 	if s.replied {
 		return nil
 	}
+
+	err := s.conn.sendReply(headers, s, fin)
+	if err != nil {
+		return err
+	}
+
 	s.replied = true
-	return s.conn.sendReply(headers, s, fin)
+	s.replyCond.Broadcast()
+	return nil
 }
 
 // Refuse sends a reset frame with the status refuse, only

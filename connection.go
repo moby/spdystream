@@ -276,6 +276,7 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		startChan:  make(chan error),
 		headers:    frame.Headers,
 		finished:   (frame.CFHeader.Flags & spdy.ControlFlagUnidirectional) != 0x00,
+		replyCond:  sync.NewCond(new(sync.Mutex)),
 		dataChan:   make(chan []byte),
 		headerChan: make(chan http.Header),
 		closeChan:  make(chan bool),
