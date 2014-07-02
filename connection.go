@@ -31,9 +31,15 @@ type Connection struct {
 	conn      net.Conn
 	framer    *spdy.Framer
 	writeLock sync.Mutex
-	closeChan chan bool
 
-	streamLock sync.RWMutex
+	closeChan      chan bool
+	goneAway       bool
+	lastStreamChan chan<- *Stream
+	goAwayTimeout  time.Duration
+	closeTimeout   time.Duration
+
+	streamLock *sync.RWMutex
+	streamCond *sync.Cond
 	streams    map[spdy.StreamId]*Stream
 
 	nextIdLock       sync.Mutex
@@ -66,11 +72,19 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 		pid = 1
 	}
 
-	session := &Connection{
-		conn:      conn,
-		framer:    framer,
-		closeChan: make(chan bool),
+	streamLock := new(sync.RWMutex)
+	streamCond := sync.NewCond(streamLock)
 
+	session := &Connection{
+		conn:   conn,
+		framer: framer,
+
+		closeChan:     make(chan bool),
+		goAwayTimeout: time.Duration(0),
+		closeTimeout:  time.Duration(0),
+
+		streamLock:       streamLock,
+		streamCond:       streamCond,
 		streams:          make(map[spdy.StreamId]*Stream),
 		nextStreamId:     sid,
 		receivedStreamId: rid,
@@ -168,6 +182,10 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			priority = 0
 			partition = partitionRoundRobin
 			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
+		case *spdy.GoAwayFrame:
+			priority = 0
+			partition = partitionRoundRobin
+			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
 		default:
 			priority = 7
 			partition = partitionRoundRobin
@@ -175,6 +193,11 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 		}
 		frameQueues[partition].Push(readFrame, priority)
 	}
+
+	s.streamCond.L.Lock()
+	s.streams = make(map[spdy.StreamId]*Stream)
+	s.streamCond.Broadcast()
+	s.streamCond.L.Unlock()
 }
 
 func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler StreamHandler) {
@@ -198,6 +221,8 @@ func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler Str
 			frameErr = s.handleHeaderFrame(frame)
 		case *spdy.PingFrame:
 			frameErr = s.handlePingFrame(frame)
+		case *spdy.GoAwayFrame:
+			frameErr = s.handleGoAwayFrame(frame)
 		default:
 			frameErr = fmt.Errorf("unhandled frame type: %T", frame)
 		}
@@ -209,9 +234,7 @@ func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler Str
 }
 
 func (s *Connection) getStreamPriority(streamId spdy.StreamId) uint8 {
-	s.streamLock.RLock()
-	stream, streamOk := s.streams[streamId]
-	s.streamLock.RUnlock()
+	stream, streamOk := s.getStream(streamId)
 	if !streamOk {
 		return 7
 	}
@@ -224,6 +247,9 @@ func (s *Connection) getStreamPriority(streamId spdy.StreamId) uint8 {
 func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
 	s.receiveIdLock.Lock()
 	defer s.receiveIdLock.Unlock()
+	if s.goneAway {
+		return false
+	}
 	validationErr := s.validateStreamId(frame.StreamId)
 	if validationErr != nil {
 		go func() {
@@ -240,9 +266,7 @@ func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
 func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
 	var parent *Stream
 	if frame.AssociatedToStreamId != spdy.StreamId(0) {
-		s.streamLock.RLock()
-		parent = s.streams[frame.AssociatedToStreamId]
-		s.streamLock.RUnlock()
+		parent, _ = s.getStream(frame.AssociatedToStreamId)
 	}
 
 	stream := &Stream{
@@ -261,9 +285,7 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 		close(stream.closeChan)
 	}
 
-	s.streamLock.Lock()
-	s.streams[frame.StreamId] = stream
-	s.streamLock.Unlock()
+	s.addStream(stream)
 
 	newHandler(stream)
 
@@ -271,9 +293,7 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 }
 
 func (s *Connection) handleReplyFrame(frame *spdy.SynReplyFrame) error {
-	s.streamLock.RLock()
-	stream, streamOk := s.streams[frame.StreamId]
-	s.streamLock.RUnlock()
+	stream, streamOk := s.getStream(frame.StreamId)
 	if !streamOk {
 		// Stream has already gone away
 		return nil
@@ -295,13 +315,12 @@ func (s *Connection) handleReplyFrame(frame *spdy.SynReplyFrame) error {
 }
 
 func (s *Connection) handleResetFrame(frame *spdy.RstStreamFrame) error {
-	s.streamLock.RLock()
-	stream, streamOk := s.streams[frame.StreamId]
-	s.streamLock.RUnlock()
+	stream, streamOk := s.getStream(frame.StreamId)
 	if !streamOk {
-		// Stream has already gone away
+		// Stream has already been removed
 		return nil
 	}
+	s.removeStream(stream)
 	stream.dataLock.Lock()
 	select {
 	case <-stream.closeChan:
@@ -326,9 +345,7 @@ func (s *Connection) handleResetFrame(frame *spdy.RstStreamFrame) error {
 }
 
 func (s *Connection) handleHeaderFrame(frame *spdy.HeadersFrame) error {
-	s.streamLock.RLock()
-	stream, streamOk := s.streams[frame.StreamId]
-	s.streamLock.RUnlock()
+	stream, streamOk := s.getStream(frame.StreamId)
 	if !streamOk {
 		// Stream has already gone away
 		return nil
@@ -353,9 +370,7 @@ func (s *Connection) handleHeaderFrame(frame *spdy.HeadersFrame) error {
 }
 
 func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
-	s.streamLock.RLock()
-	stream, streamOk := s.streams[frame.StreamId]
-	s.streamLock.RUnlock()
+	stream, streamOk := s.getStream(frame.StreamId)
 	if !streamOk {
 		// Stream has already gone away
 		return nil
@@ -391,6 +406,33 @@ func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
 	if pingOk {
 		close(pingChan)
 	}
+	return nil
+}
+
+func (s *Connection) handleGoAwayFrame(frame *spdy.GoAwayFrame) error {
+	s.receiveIdLock.Lock()
+	if s.goneAway {
+		s.receiveIdLock.Unlock()
+		return nil
+	}
+	s.goneAway = true
+	s.receiveIdLock.Unlock()
+
+	if s.lastStreamChan != nil {
+		stream, _ := s.getStream(frame.LastGoodStreamId)
+		go func() {
+			s.lastStreamChan <- stream
+		}()
+	}
+
+	// Do not block frame handler waiting for closure
+	go func() {
+		err := s.waitClose(s.goAwayTimeout)
+		if err != nil {
+			fmt.Errorf("close error: %s", err)
+		}
+	}()
+
 	return nil
 }
 
@@ -437,25 +479,87 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 		closeChan:  make(chan bool),
 	}
 
-	s.streamLock.Lock()
-	s.streams[streamId] = stream
-	s.streamLock.Unlock()
+	s.addStream(stream)
 
 	return stream, s.sendStream(stream, fin)
 }
 
-// Closes spdy connection, including network connection used
-// to create the spdy connection.
-func (s *Connection) Close() error {
-	// TODO send GOAWAY
-	for _, stream := range s.streams {
-		resetErr := stream.Reset()
-		if resetErr != nil {
-			return resetErr
-		}
+func (s *Connection) waitClose(closeTimeout time.Duration) (err error) {
+	var timeout <-chan time.Time
+	if closeTimeout > time.Duration(0) {
+		timeout = time.After(closeTimeout)
 	}
-	close(s.closeChan)
-	return s.conn.Close()
+	streamsClosed := make(chan bool)
+
+	go func() {
+		s.streamCond.L.Lock()
+		for len(s.streams) > 0 {
+			s.streamCond.Wait()
+		}
+		s.streamCond.L.Unlock()
+		close(streamsClosed)
+	}()
+
+	select {
+	case <-streamsClosed:
+		// No active streams, close should be safe
+		err = s.conn.Close()
+	case <-timeout:
+		// Force ungraceful close
+		err = s.conn.Close()
+		// Wait for cleanup to clear active streams
+		<-streamsClosed
+	}
+	return
+}
+
+// Closes spdy connection by sending GoAway frame and waiting for
+// streams to finish.
+func (s *Connection) Close() error {
+	s.receiveIdLock.Lock()
+	if s.goneAway {
+		s.receiveIdLock.Unlock()
+		return nil
+	}
+	s.goneAway = true
+	s.receiveIdLock.Unlock()
+
+	var lastStreamId spdy.StreamId
+	if s.receivedStreamId > 2 {
+		lastStreamId = s.receivedStreamId - 2
+	}
+
+	goAwayFrame := &spdy.GoAwayFrame{
+		LastGoodStreamId: lastStreamId,
+		Status:           spdy.GoAwayOK,
+	}
+
+	s.writeLock.Lock()
+	err := s.framer.WriteFrame(goAwayFrame)
+	s.writeLock.Unlock()
+	if err != nil {
+		return err
+	}
+
+	return s.waitClose(s.closeTimeout)
+}
+
+// NotifyClose registers a channel to be called when the remote
+// peer inidicates connection closure.  The last stream to be
+// received by the remote will be sent on the channel.  The notify
+// timeout will determine the duration between go away received
+// and the connection being closed.
+func (s *Connection) NotifyClose(c chan<- *Stream, timeout time.Duration) {
+	s.goAwayTimeout = timeout
+	s.lastStreamChan = c
+}
+
+// SetCloseTimeout sets the amount of time close will wait for
+// streams to finish before terminating the underlying network
+// connection.  Setting the timeout to 0 will cause close to
+// wait forever, which is the default.
+func (s *Connection) SetCloseTimeout(timeout time.Duration) {
+	s.closeTimeout = timeout
 }
 
 func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) error {
@@ -552,8 +656,23 @@ func (s *Connection) validateStreamId(rid spdy.StreamId) error {
 	return nil
 }
 
+func (s *Connection) addStream(stream *Stream) {
+	s.streamCond.L.Lock()
+	s.streams[stream.streamId] = stream
+	s.streamCond.Broadcast()
+	s.streamCond.L.Unlock()
+}
+
 func (s *Connection) removeStream(stream *Stream) {
-	s.streamLock.Lock()
+	s.streamCond.L.Lock()
 	delete(s.streams, stream.streamId)
-	s.streamLock.Unlock()
+	s.streamCond.Broadcast()
+	s.streamCond.L.Unlock()
+}
+
+func (s *Connection) getStream(streamId spdy.StreamId) (stream *Stream, ok bool) {
+	s.streamLock.RLock()
+	stream, ok = s.streams[streamId]
+	s.streamLock.RUnlock()
+	return
 }
