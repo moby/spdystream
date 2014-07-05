@@ -230,10 +230,14 @@ func (s *Stream) Headers() http.Header {
 	return s.headers
 }
 
-// String returns the string version of stream using the
-// streamId to uniquely identify the stream
+// String returns the string version of stream identifier.
 func (s *Stream) String() string {
 	return fmt.Sprintf("stream:%d", s.streamId)
+}
+
+// Id returns the stream identifier which can be used to uniquely identify the stream.
+func (s *Stream) Id() uint32 {
+	return uint32(s.streamId)
 }
 
 // IsFinished returns whether the stream has finished
