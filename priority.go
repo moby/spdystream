@@ -93,4 +93,5 @@ func (q *PriorityFrameQueue) Drain() {
 	q.c.L.Lock()
 	defer q.c.L.Unlock()
 	q.drain = true
+	q.c.Broadcast()
 }
