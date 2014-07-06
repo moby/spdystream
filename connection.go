@@ -165,6 +165,9 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			if s.checkStreamFrame(frame) {
 				priority = frame.Priority
 				partition = int(frame.StreamId % FRAME_WORKERS)
+				s.addStreamFrame(frame)
+			} else {
+				continue
 			}
 		case *spdy.SynReplyFrame:
 			priority = s.getStreamPriority(frame.StreamId)
@@ -241,6 +244,32 @@ func (s *Connection) getStreamPriority(streamId spdy.StreamId) uint8 {
 	return stream.priority
 }
 
+func (s *Connection) addStreamFrame(frame *spdy.SynStreamFrame) {
+	var parent *Stream
+	if frame.AssociatedToStreamId != spdy.StreamId(0) {
+		parent, _ = s.getStream(frame.AssociatedToStreamId)
+	}
+
+	stream := &Stream{
+		streamId:   frame.StreamId,
+		parent:     parent,
+		conn:       s,
+		startChan:  make(chan error),
+		headers:    frame.Headers,
+		finished:   (frame.CFHeader.Flags & spdy.ControlFlagUnidirectional) != 0x00,
+		replyCond:  sync.NewCond(new(sync.Mutex)),
+		dataChan:   make(chan []byte),
+		headerChan: make(chan http.Header),
+		closeChan:  make(chan bool),
+	}
+	if frame.CFHeader.Flags&spdy.ControlFlagFin != 0x00 {
+		close(stream.dataChan)
+		close(stream.closeChan)
+	}
+
+	s.addStream(stream)
+}
+
 // checkStreamFrame checks to see if a stream frame is allowed.
 // If the stream is invalid, then a reset frame with protocol error
 // will be returned.
@@ -264,28 +293,10 @@ func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
 }
 
 func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
-	var parent *Stream
-	if frame.AssociatedToStreamId != spdy.StreamId(0) {
-		parent, _ = s.getStream(frame.AssociatedToStreamId)
+	stream, ok := s.getStream(frame.StreamId)
+	if !ok {
+		return fmt.Errorf("Missing stream: %d", frame.StreamId)
 	}
-
-	stream := &Stream{
-		streamId:   frame.StreamId,
-		parent:     parent,
-		conn:       s,
-		startChan:  make(chan error),
-		headers:    frame.Headers,
-		finished:   (frame.CFHeader.Flags & spdy.ControlFlagUnidirectional) != 0x00,
-		dataChan:   make(chan []byte),
-		headerChan: make(chan http.Header),
-		closeChan:  make(chan bool),
-	}
-	if frame.CFHeader.Flags&spdy.ControlFlagFin != 0x00 {
-		close(stream.dataChan)
-		close(stream.closeChan)
-	}
-
-	s.addStream(stream)
 
 	newHandler(stream)
 
@@ -675,4 +686,20 @@ func (s *Connection) getStream(streamId spdy.StreamId) (stream *Stream, ok bool)
 	stream, ok = s.streams[streamId]
 	s.streamLock.RUnlock()
 	return
+}
+
+// FindStream looks up the given stream id and either waits for the
+// stream to be found or returns nil if the stream id is no longer
+// valid.
+func (s *Connection) FindStream(streamId uint32) *Stream {
+	var stream *Stream
+	var ok bool
+	s.streamCond.L.Lock()
+	stream, ok = s.streams[spdy.StreamId(streamId)]
+	for !ok && streamId >= uint32(s.receivedStreamId) {
+		s.streamCond.Wait()
+		stream, ok = s.streams[spdy.StreamId(streamId)]
+	}
+	s.streamCond.L.Unlock()
+	return stream
 }

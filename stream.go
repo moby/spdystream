@@ -2,12 +2,17 @@ package spdystream
 
 import (
 	"code.google.com/p/go.net/spdy"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"sync"
 	"time"
+)
+
+var (
+	ErrUnreadPartialData = errors.New("unread partial data")
 )
 
 type Stream struct {
@@ -24,13 +29,15 @@ type Stream struct {
 	headers    http.Header
 	headerChan chan http.Header
 	finishLock sync.Mutex
-	replied    bool
 	finished   bool
+	replyCond  *sync.Cond
+	replied    bool
 	closeChan  chan bool
 }
 
 // WriteData writes data to stream, sending a dataframe per call
 func (s *Stream) WriteData(data []byte, fin bool) error {
+	s.waitWriteReply()
 	var flags spdy.DataFlags
 
 	if fin {
@@ -86,6 +93,34 @@ func (s *Stream) Read(p []byte) (n int, err error) {
 		s.unread = nil
 	}
 	return
+}
+
+// ReadData reads an entire data frame and returns the byte array
+// from the data frame.  If there is unread data from the result
+// of a Read call, this function will return an ErrUnreadPartialData.
+func (s *Stream) ReadData() ([]byte, error) {
+	if s.unread != nil {
+		return nil, ErrUnreadPartialData
+	}
+	select {
+	case <-s.closeChan:
+		return nil, io.EOF
+	case read, ok := <-s.dataChan:
+		if !ok {
+			return nil, io.EOF
+		}
+		return read, nil
+	}
+}
+
+func (s *Stream) waitWriteReply() {
+	if s.replyCond != nil {
+		s.replyCond.L.Lock()
+		for !s.replied {
+			s.replyCond.Wait()
+		}
+		s.replyCond.L.Unlock()
+	}
 }
 
 // Wait waits for the stream to receive a reply.
@@ -178,11 +213,23 @@ func (s *Stream) SendHeader(headers http.Header, fin bool) error {
 // SendReply sends a reply on a stream, only valid to be called once
 // when handling a new stream
 func (s *Stream) SendReply(headers http.Header, fin bool) error {
+	if s.replyCond == nil {
+		return errors.New("cannot reply on initiated stream")
+	}
+	s.replyCond.L.Lock()
+	defer s.replyCond.L.Unlock()
 	if s.replied {
 		return nil
 	}
+
+	err := s.conn.sendReply(headers, s, fin)
+	if err != nil {
+		return err
+	}
+
 	s.replied = true
-	return s.conn.sendReply(headers, s, fin)
+	s.replyCond.Broadcast()
+	return nil
 }
 
 // Refuse sends a reset frame with the status refuse, only
@@ -234,6 +281,11 @@ func (s *Stream) Headers() http.Header {
 // streamId to uniquely identify the stream
 func (s *Stream) String() string {
 	return fmt.Sprintf("stream:%d", s.streamId)
+}
+
+// Identifier returns a 32 bit identifier for the stream
+func (s *Stream) Identifier() uint32 {
+	return uint32(s.streamId)
 }
 
 // IsFinished returns whether the stream has finished
