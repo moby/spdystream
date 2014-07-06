@@ -196,6 +196,7 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 		}
 		frameQueues[partition].Push(readFrame, priority)
 	}
+	close(s.closeChan)
 
 	s.streamCond.L.Lock()
 	s.streams = make(map[spdy.StreamId]*Stream)
