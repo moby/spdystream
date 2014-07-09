@@ -155,6 +155,8 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 		if err != nil {
 			if err != io.EOF {
 				fmt.Errorf("frame read error: %s", err)
+			} else {
+				debugMessage("EOF received")
 			}
 			break
 		}
@@ -165,8 +167,10 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			if s.checkStreamFrame(frame) {
 				priority = frame.Priority
 				partition = int(frame.StreamId % FRAME_WORKERS)
+				debugMessage("(%p) Add stream frame: %d ", s, frame.StreamId)
 				s.addStreamFrame(frame)
 			} else {
+				debugMessage("(%p) Rejected stream frame: %d ", s, frame.StreamId)
 				continue
 			}
 		case *spdy.SynReplyFrame:
@@ -305,8 +309,10 @@ func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler St
 }
 
 func (s *Connection) handleReplyFrame(frame *spdy.SynReplyFrame) error {
+	debugMessage("(%p) Reply frame received for %d", s, frame.StreamId)
 	stream, streamOk := s.getStream(frame.StreamId)
 	if !streamOk {
+		debugMessage("Reply frame gone away for %d", frame.StreamId)
 		// Stream has already gone away
 		return nil
 	}
@@ -382,23 +388,29 @@ func (s *Connection) handleHeaderFrame(frame *spdy.HeadersFrame) error {
 }
 
 func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
+	debugMessage("(%p) Data frame received for %d", s, frame.StreamId)
 	stream, streamOk := s.getStream(frame.StreamId)
 	if !streamOk {
+		debugMessage("Data frame gone away for %d", frame.StreamId)
 		// Stream has already gone away
 		return nil
 	}
 	if !stream.replied {
+		debugMessage("Data frame not replied %d", frame.StreamId)
 		// No reply received...Protocol error?
 		return nil
 	}
 
+	debugMessage("(%p) (%d) Data frame handling", stream, stream.streamId)
 	if len(frame.Data) > 0 {
 		stream.dataLock.RLock()
 		select {
 		case <-stream.closeChan:
 			break
 		default:
+			debugMessage("(%p) (%d) Data frame send chan", stream, stream.streamId)
 			stream.dataChan <- frame.Data
+			debugMessage("(%p) (%d) Data frame sent", stream, stream.streamId)
 		}
 		stream.dataLock.RUnlock()
 	}
@@ -422,6 +434,7 @@ func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
 }
 
 func (s *Connection) handleGoAwayFrame(frame *spdy.GoAwayFrame) error {
+	debugMessage("(%p) Go away received", s)
 	s.receiveIdLock.Lock()
 	if s.goneAway {
 		s.receiveIdLock.Unlock()
@@ -491,6 +504,8 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 		closeChan:  make(chan bool),
 	}
 
+	debugMessage("(%p) (%p) Create stream", s, stream)
+
 	s.addStream(stream)
 
 	return stream, s.sendStream(stream, fin)
@@ -506,6 +521,7 @@ func (s *Connection) waitClose(closeTimeout time.Duration) (err error) {
 	go func() {
 		s.streamCond.L.Lock()
 		for len(s.streams) > 0 {
+			debugMessage("Streams opened: %d, %#v", len(s.streams), s.streams)
 			s.streamCond.Wait()
 		}
 		s.streamCond.L.Unlock()
@@ -522,6 +538,7 @@ func (s *Connection) waitClose(closeTimeout time.Duration) (err error) {
 		// Wait for cleanup to clear active streams
 		<-streamsClosed
 	}
+
 	return
 }
 
@@ -671,6 +688,7 @@ func (s *Connection) validateStreamId(rid spdy.StreamId) error {
 func (s *Connection) addStream(stream *Stream) {
 	s.streamCond.L.Lock()
 	s.streams[stream.streamId] = stream
+	debugMessage("(%p) (%p) Stream added, broadcasting: %d", s, stream, stream.streamId)
 	s.streamCond.Broadcast()
 	s.streamCond.L.Unlock()
 }
@@ -678,6 +696,7 @@ func (s *Connection) addStream(stream *Stream) {
 func (s *Connection) removeStream(stream *Stream) {
 	s.streamCond.L.Lock()
 	delete(s.streams, stream.streamId)
+	debugMessage("Stream removed, broadcasting: %d", stream.streamId)
 	s.streamCond.Broadcast()
 	s.streamCond.L.Unlock()
 }
@@ -697,6 +716,7 @@ func (s *Connection) FindStream(streamId uint32) *Stream {
 	var ok bool
 	s.streamCond.L.Lock()
 	stream, ok = s.streams[spdy.StreamId(streamId)]
+	debugMessage("(%p) Found stream %d? %t", s, spdy.StreamId(streamId), ok)
 	for !ok && streamId >= uint32(s.receivedStreamId) {
 		s.streamCond.Wait()
 		stream, ok = s.streams[spdy.StreamId(streamId)]

@@ -59,6 +59,7 @@ func (s *Stream) WriteData(data []byte, fin bool) error {
 
 	s.conn.writeLock.Lock()
 	defer s.conn.writeLock.Unlock()
+	debugMessage("(%p) (%d) Writing data frame", s, s.streamId)
 	return s.conn.framer.WriteFrame(dataFrame)
 }
 
@@ -99,6 +100,7 @@ func (s *Stream) Read(p []byte) (n int, err error) {
 // from the data frame.  If there is unread data from the result
 // of a Read call, this function will return an ErrUnreadPartialData.
 func (s *Stream) ReadData() ([]byte, error) {
+	debugMessage("(%p) Reading data from %d", s, s.streamId)
 	if s.unread != nil {
 		return nil, ErrUnreadPartialData
 	}
