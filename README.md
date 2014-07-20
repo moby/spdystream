@@ -5,7 +5,8 @@ A multiplexed stream library using spdy
 ## Usage
 
 Client example (connecting to mirroring server without auth)
-~~~~
+
+```go
 package main
 
 import (
@@ -41,10 +42,11 @@ func main() {
 
 	stream.Close()
 }
-~~~~
+```
 
 Server example (mirroring server without auth)
-~~~~
+
+```go
 package main
 
 import (
@@ -69,7 +71,7 @@ func main() {
 		go spdyConn.Serve(spdystream.MirrorStreamHandler)
 	}
 }
-~~~~
+```
 
 ## Copyright and license
 
