@@ -143,19 +143,16 @@ func (s *Connection) Ping() (time.Duration, error) {
 func (s *Connection) Serve(newHandler StreamHandler) {
 	// Parition queues to ensure stream frames are handled
 	// by the same worker, ensuring order is maintained
-	frameQueues := make([]*PriorityFrameQueue, FRAME_WORKERS)
+	frameQueue := NewPriorityFrameQueue(QUEUE_SIZE)
+	// Ensure frame queue is drained when connection is closed
+	go func() {
+		<-s.closeChan
+		frameQueue.Drain()
+	}()
 	for i := 0; i < FRAME_WORKERS; i++ {
-		frameQueues[i] = NewPriorityFrameQueue(QUEUE_SIZE)
-		// Ensure frame queue is drained when connection is closed
-		go func(frameQueue *PriorityFrameQueue) {
-			<-s.closeChan
-			frameQueue.Drain()
-		}(frameQueues[i])
-
-		go s.frameHandler(frameQueues[i], newHandler)
+		go s.frameHandler(frameQueue, newHandler)
 	}
 
-	var partitionRoundRobin int
 	for {
 		readFrame, err := s.framer.ReadFrame()
 		if err != nil {
@@ -167,12 +164,10 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			break
 		}
 		var priority uint8
-		var partition int
 		switch frame := readFrame.(type) {
 		case *spdy.SynStreamFrame:
 			if s.checkStreamFrame(frame) {
 				priority = frame.Priority
-				partition = int(frame.StreamId % FRAME_WORKERS)
 				debugMessage("(%p) Add stream frame: %d ", s, frame.StreamId)
 				s.addStreamFrame(frame)
 			} else {
@@ -181,30 +176,20 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			}
 		case *spdy.SynReplyFrame:
 			priority = s.getStreamPriority(frame.StreamId)
-			partition = int(frame.StreamId % FRAME_WORKERS)
 		case *spdy.DataFrame:
 			priority = s.getStreamPriority(frame.StreamId)
-			partition = int(frame.StreamId % FRAME_WORKERS)
 		case *spdy.RstStreamFrame:
 			priority = s.getStreamPriority(frame.StreamId)
-			partition = int(frame.StreamId % FRAME_WORKERS)
 		case *spdy.HeadersFrame:
 			priority = s.getStreamPriority(frame.StreamId)
-			partition = int(frame.StreamId % FRAME_WORKERS)
 		case *spdy.PingFrame:
 			priority = 0
-			partition = partitionRoundRobin
-			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
 		case *spdy.GoAwayFrame:
 			priority = 0
-			partition = partitionRoundRobin
-			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
 		default:
 			priority = 7
-			partition = partitionRoundRobin
-			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
 		}
-		frameQueues[partition].Push(readFrame, priority)
+		frameQueue.Push(readFrame, priority)
 	}
 	close(s.closeChan)
 
