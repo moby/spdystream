@@ -26,8 +26,7 @@ func main() {
 		panic(err)
 	}
 	go spdyConn.Serve(spdystream.NoOpStreamHandler)
-	stream := spdyConn.CreateStream(http.Header{}, nil)
-	err = stream.Open(false)
+	stream, err := spdyConn.CreateStream(http.Header{}, nil, false)
 	if err != nil {
 		panic(err)
 	}
