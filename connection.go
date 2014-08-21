@@ -743,6 +743,12 @@ func (s *Connection) getNextStreamId() spdy.StreamId {
 	return sid
 }
 
+// PeekNextStreamId returns the next sequential id and keeps the next id untouched
+func (s *Connection) PeekNextStreamId() spdy.StreamId {
+	sid := s.nextStreamId
+	return sid
+}
+
 func (s *Connection) validateStreamId(rid spdy.StreamId) error {
 	if rid > 0x7fffffff || rid < s.receivedStreamId {
 		return ErrInvalidStreamId
