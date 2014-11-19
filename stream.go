@@ -1,7 +1,6 @@
 package spdystream
 
 import (
-	"code.google.com/p/go.net/spdy"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"code.google.com/p/go.net/spdy"
 )
 
 var (
@@ -60,6 +61,7 @@ func (s *Stream) WriteData(data []byte, fin bool) error {
 	s.conn.writeLock.Lock()
 	defer s.conn.writeLock.Unlock()
 	debugMessage("(%p) (%d) Writing data frame", s, s.streamId)
+	debugFrame(s.conn, dataFrame, true)
 	return s.conn.framer.WriteFrame(dataFrame)
 }
 
@@ -191,6 +193,7 @@ func (s *Stream) Reset() error {
 	}
 	s.conn.writeLock.Lock()
 	defer s.conn.writeLock.Unlock()
+	debugFrame(s.conn, resetFrame, true)
 	return s.conn.framer.WriteFrame(resetFrame)
 }
 

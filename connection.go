@@ -1,7 +1,6 @@
 package spdystream
 
 import (
-	"code.google.com/p/go.net/spdy"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"code.google.com/p/go.net/spdy"
 )
 
 var (
@@ -114,6 +115,7 @@ func (s *Connection) Ping() (time.Duration, error) {
 	frame := &spdy.PingFrame{Id: pid}
 	startTime := time.Now()
 	s.writeLock.Lock()
+	debugFrame(s, frame, true)
 	writeErr := s.framer.WriteFrame(frame)
 	s.writeLock.Unlock()
 	if writeErr != nil {
@@ -157,9 +159,11 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 				fmt.Errorf("frame read error: %s", err)
 			} else {
 				debugMessage("EOF received")
+				debugFrame(s, nil, false)
 			}
 			break
 		}
+		debugFrame(s, readFrame, false)
 		var priority uint8
 		var partition int
 		switch frame := readFrame.(type) {
@@ -424,6 +428,7 @@ func (s *Connection) handlePingFrame(frame *spdy.PingFrame) error {
 	if s.pingId&0x01 != frame.Id&0x01 {
 		s.writeLock.Lock()
 		defer s.writeLock.Unlock()
+		debugFrame(s, frame, true)
 		return s.framer.WriteFrame(frame)
 	}
 	pingChan, pingOk := s.pingChans[frame.Id]
@@ -564,6 +569,7 @@ func (s *Connection) Close() error {
 	}
 
 	s.writeLock.Lock()
+	debugFrame(s, goAwayFrame, true)
 	err := s.framer.WriteFrame(goAwayFrame)
 	s.writeLock.Unlock()
 	if err != nil {
@@ -605,6 +611,8 @@ func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) 
 
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
+	debugMessage("(%p) (%d) Writing header frame", s, stream.streamId)
+	debugFrame(s, headerFrame, true)
 	return s.framer.WriteFrame(headerFrame)
 }
 
@@ -622,6 +630,8 @@ func (s *Connection) sendReply(headers http.Header, stream *Stream, fin bool) er
 
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
+	debugMessage("(%p) (%d) Writing reply frame", s, stream.streamId)
+	debugFrame(s, replyFrame, true)
 	return s.framer.WriteFrame(replyFrame)
 }
 
@@ -633,6 +643,7 @@ func (s *Connection) sendResetFrame(status spdy.RstStreamStatus, streamId spdy.S
 
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
+	debugFrame(s, resetFrame, true)
 	return s.framer.WriteFrame(resetFrame)
 }
 
@@ -661,6 +672,7 @@ func (s *Connection) sendStream(stream *Stream, fin bool) error {
 
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
+	debugFrame(s, streamFrame, true)
 	return s.framer.WriteFrame(streamFrame)
 }
 
