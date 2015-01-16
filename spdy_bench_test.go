@@ -9,24 +9,20 @@ import (
 	"testing"
 )
 
-const (
-	LISTEN_ADDRESS = "127.0.0.1:7777"
-)
-
-func configureServer() (io.Closer, *sync.WaitGroup) {
+func configureServer() (io.Closer, string, *sync.WaitGroup) {
 	authenticated = true
 	wg := &sync.WaitGroup{}
-	server, serverErr := runServer(LISTEN_ADDRESS, wg)
+	server, listen, serverErr := runServer(wg)
 
 	if serverErr != nil {
 		panic(serverErr)
 	}
 
-	return server, wg
+	return server, listen, wg
 }
 
 func BenchmarkDial10000(b *testing.B) {
-	server, wg := configureServer()
+	server, addr, wg := configureServer()
 
 	defer func() {
 		server.Close()
@@ -34,7 +30,7 @@ func BenchmarkDial10000(b *testing.B) {
 	}()
 
 	for i := 0; i < b.N; i++ {
-		conn, dialErr := net.Dial("tcp", LISTEN_ADDRESS)
+		conn, dialErr := net.Dial("tcp", addr)
 		if dialErr != nil {
 			panic(fmt.Sprintf("Error dialing server: %s", dialErr))
 		}
@@ -43,7 +39,7 @@ func BenchmarkDial10000(b *testing.B) {
 }
 
 func BenchmarkDialWithSPDYStream10000(b *testing.B) {
-	server, wg := configureServer()
+	server, addr, wg := configureServer()
 
 	defer func() {
 		server.Close()
@@ -51,7 +47,7 @@ func BenchmarkDialWithSPDYStream10000(b *testing.B) {
 	}()
 
 	for i := 0; i < b.N; i++ {
-		conn, dialErr := net.Dial("tcp", LISTEN_ADDRESS)
+		conn, dialErr := net.Dial("tcp", addr)
 		if dialErr != nil {
 			b.Fatalf("Error dialing server: %s", dialErr)
 		}
@@ -70,7 +66,7 @@ func BenchmarkDialWithSPDYStream10000(b *testing.B) {
 }
 
 func benchmarkStreamWithDataAndSize(size uint64, b *testing.B) {
-	server, wg := configureServer()
+	server, addr, wg := configureServer()
 
 	defer func() {
 		server.Close()
@@ -78,7 +74,7 @@ func benchmarkStreamWithDataAndSize(size uint64, b *testing.B) {
 	}()
 
 	for i := 0; i < b.N; i++ {
-		conn, dialErr := net.Dial("tcp", LISTEN_ADDRESS)
+		conn, dialErr := net.Dial("tcp", addr)
 		if dialErr != nil {
 			b.Fatalf("Error dialing server: %s", dialErr)
 		}
