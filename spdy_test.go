@@ -2,6 +2,7 @@ package spdystream
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -250,6 +251,96 @@ func TestHalfClose(t *testing.T) {
 		t.Fatalf("Error shutting down server: %s", closeErr)
 	}
 	wg.Wait()
+}
+
+func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
+	tt := []struct {
+		closeReceiver bool
+		closeSender   bool
+	}{
+		{closeReceiver: true, closeSender: false},
+		{closeReceiver: false, closeSender: true},
+		{closeReceiver: false, closeSender: false},
+	}
+	for tix, tc := range tt {
+		listen := fmt.Sprintf("localhost:774%d", tix)
+		listener, listenErr := net.Listen("tcp", listen)
+		if listenErr != nil {
+			t.Fatalf("Error listening: %v", listenErr)
+		}
+
+		var serverConn net.Conn
+		var connErr error
+		go func() {
+			serverConn, connErr = listener.Accept()
+			if connErr != nil {
+				t.Fatalf("Error accepting: %v", listenErr)
+			}
+
+			serverSpdyConn, _ := NewConnection(serverConn, true)
+			go serverSpdyConn.Serve(func(stream *Stream) {
+				stream.SendReply(http.Header{}, tc.closeSender)
+			})
+		}()
+
+		conn, dialErr := net.Dial("tcp", listen)
+		if dialErr != nil {
+			t.Fatalf("Error dialing server: %s", dialErr)
+		}
+
+		spdyConn, spdyErr := NewConnection(conn, false)
+		if spdyErr != nil {
+			t.Fatalf("Error creating spdy connection: %s", spdyErr)
+		}
+		go spdyConn.Serve(NoOpStreamHandler)
+
+		authenticated = true
+		stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
+		if streamErr != nil {
+			t.Fatalf("Error creating stream: %s", streamErr)
+		}
+
+		waitErr := stream.Wait()
+		if waitErr != nil {
+			t.Fatalf("Error waiting for stream: %s", waitErr)
+		}
+
+		if tc.closeReceiver {
+			// make stream half closed, receive only
+			stream.Close()
+		}
+
+		streamch := make(chan error, 1)
+		go func() {
+			b := make([]byte, 1)
+			_, err := stream.Read(b)
+			streamch <- err
+		}()
+
+		closeErr := serverConn.Close()
+		if closeErr != nil {
+			t.Fatalf("Error shutting down server: %s", closeErr)
+		}
+
+		select {
+		case e := <-streamch:
+			if e == nil || e != io.EOF {
+				t.Fatalf("(%d) Expected to get an EOF stream error", tix)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("(%d) Timeout waiting for stream closure", tix)
+		}
+
+		closeErr = conn.Close()
+		if closeErr != nil {
+			t.Fatalf("Error closing client connection: %s", closeErr)
+		}
+
+		listenErr = listener.Close()
+		if listenErr != nil {
+			t.Fatalf("Error closing listener: %s", listenErr)
+		}
+	}
 }
 
 var authenticated bool

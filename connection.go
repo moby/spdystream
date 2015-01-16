@@ -1,7 +1,6 @@
 package spdystream
 
 import (
-	"code.google.com/p/go.net/spdy"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"code.google.com/p/go.net/spdy"
 )
 
 var (
@@ -209,6 +210,16 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 	close(s.closeChan)
 
 	s.streamCond.L.Lock()
+	// notify streams that they're now closed, which will
+	// unblock any stream Read() calls
+	for _, stream := range s.streams {
+		select {
+		case <-stream.closeChan:
+			// do nothing, stream is already closed
+		default:
+			close(stream.closeChan)
+		}
+	}
 	s.streams = make(map[spdy.StreamId]*Stream)
 	s.streamCond.Broadcast()
 	s.streamCond.L.Unlock()
