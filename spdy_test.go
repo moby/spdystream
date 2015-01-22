@@ -269,7 +269,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 		go func() {
 			serverConn, connErr = listener.Accept()
 			if connErr != nil {
-				t.Fatalf("Error accepting: %v", listenErr)
+				t.Fatalf("Error accepting: %v", connErr)
 			}
 
 			serverSpdyConn, _ := NewConnection(serverConn, true)
@@ -335,6 +335,66 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 		if listenErr != nil {
 			t.Fatalf("Error closing listener: %s", listenErr)
 		}
+	}
+}
+
+func TestCloseNotification(t *testing.T) {
+	listener, listenErr := net.Listen("tcp", "localhost:0")
+	if listenErr != nil {
+		t.Fatalf("Error listening: %v", listenErr)
+	}
+	listen := listener.Addr().String()
+
+	var serverConn net.Conn
+	var serverSpdyConn *Connection
+	var err error
+	closeChan := make(chan struct{}, 1)
+	go func() {
+		serverConn, err = listener.Accept()
+		if err != nil {
+			t.Fatalf("Error accepting: %v", err)
+		}
+
+		serverSpdyConn, err = NewConnection(serverConn, true)
+		if err != nil {
+			t.Fatalf("Error creating server connection: %v", err)
+		}
+		go serverSpdyConn.Serve(NoOpStreamHandler)
+		<-serverSpdyConn.CloseChan()
+		close(closeChan)
+	}()
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	// close client conn
+	err = conn.Close()
+	if err != nil {
+		t.Fatalf("Error closing client connection: %v", err)
+	}
+
+	select {
+	case <-closeChan:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timed out waiting for connection closed notification")
+	}
+
+	err = serverConn.Close()
+	if err != nil {
+		t.Fatalf("Error closing serverConn: %v", err)
+	}
+
+	listenErr = listener.Close()
+	if listenErr != nil {
+		t.Fatalf("Error closing listener: %s", listenErr)
 	}
 }
 

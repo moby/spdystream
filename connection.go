@@ -807,3 +807,7 @@ func (s *Connection) FindStream(streamId uint32) *Stream {
 	s.streamCond.L.Unlock()
 	return stream
 }
+
+func (s *Connection) CloseChan() <-chan bool {
+	return s.closeChan
+}
