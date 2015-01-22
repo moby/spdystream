@@ -2,7 +2,6 @@ package spdystream
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -13,8 +12,7 @@ import (
 
 func TestSpdyStreams(t *testing.T) {
 	var wg sync.WaitGroup
-	listen := "localhost:7443"
-	server, serverErr := runServer(listen, &wg)
+	server, listen, serverErr := runServer(&wg)
 	if serverErr != nil {
 		t.Fatalf("Error initializing server: %s", serverErr)
 	}
@@ -156,8 +154,7 @@ func TestSpdyStreams(t *testing.T) {
 
 func TestPing(t *testing.T) {
 	var wg sync.WaitGroup
-	listen := "localhost:7543"
-	server, serverErr := runServer(listen, &wg)
+	server, listen, serverErr := runServer(&wg)
 	if serverErr != nil {
 		t.Fatalf("Error initializing server: %s", serverErr)
 	}
@@ -190,8 +187,7 @@ func TestPing(t *testing.T) {
 
 func TestHalfClose(t *testing.T) {
 	var wg sync.WaitGroup
-	listen := "localhost:7643"
-	server, serverErr := runServer(listen, &wg)
+	server, listen, serverErr := runServer(&wg)
 	if serverErr != nil {
 		t.Fatalf("Error initializing server: %s", serverErr)
 	}
@@ -263,8 +259,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 		{closeReceiver: false, closeSender: false},
 	}
 	for tix, tc := range tt {
-		listen := fmt.Sprintf("localhost:774%d", tix)
-		listener, listenErr := net.Listen("tcp", listen)
+		listener, listenErr := net.Listen("tcp", "localhost:0")
 		if listenErr != nil {
 			t.Fatalf("Error listening: %v", listenErr)
 		}
@@ -283,7 +278,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 			})
 		}()
 
-		conn, dialErr := net.Dial("tcp", listen)
+		conn, dialErr := net.Dial("tcp", listener.Addr().String())
 		if dialErr != nil {
 			t.Fatalf("Error dialing server: %s", dialErr)
 		}
@@ -352,10 +347,10 @@ func authStreamHandler(stream *Stream) {
 	MirrorStreamHandler(stream)
 }
 
-func runServer(listen string, wg *sync.WaitGroup) (io.Closer, error) {
-	listener, listenErr := net.Listen("tcp", listen)
+func runServer(wg *sync.WaitGroup) (io.Closer, string, error) {
+	listener, listenErr := net.Listen("tcp", "localhost:0")
 	if listenErr != nil {
-		return nil, listenErr
+		return nil, "", listenErr
 	}
 	wg.Add(1)
 	go func() {
@@ -371,5 +366,5 @@ func runServer(listen string, wg *sync.WaitGroup) (io.Closer, error) {
 		}
 		wg.Done()
 	}()
-	return listener, nil
+	return listener, listener.Addr().String(), nil
 }
