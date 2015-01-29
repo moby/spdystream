@@ -28,9 +28,38 @@ type StreamHandler func(stream *Stream)
 
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
 
+type idleAwareFramer struct {
+	f    *spdy.Framer
+	conn *Connection
+}
+
+func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
+	err := i.f.WriteFrame(frame)
+	if err != nil {
+		return err
+	}
+
+	if i.conn.idleTimeout > 0 {
+		i.conn.conn.SetDeadline(time.Now().Add(i.conn.idleTimeout))
+	}
+	return nil
+}
+
+func (i *idleAwareFramer) ReadFrame() (spdy.Frame, error) {
+	frame, err := i.f.ReadFrame()
+	if err != nil {
+		return nil, err
+	}
+
+	if i.conn.idleTimeout > 0 {
+		i.conn.conn.SetDeadline(time.Now().Add(i.conn.idleTimeout))
+	}
+	return frame, nil
+}
+
 type Connection struct {
 	conn      net.Conn
-	framer    *spdy.Framer
+	framer    *idleAwareFramer
 	writeLock sync.Mutex
 
 	closeChan      chan bool
@@ -38,6 +67,7 @@ type Connection struct {
 	lastStreamChan chan<- *Stream
 	goAwayTimeout  time.Duration
 	closeTimeout   time.Duration
+	idleTimeout    time.Duration
 
 	streamLock *sync.RWMutex
 	streamCond *sync.Cond
@@ -64,6 +94,7 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 	if framerErr != nil {
 		return nil, framerErr
 	}
+	idleAwareFramer := &idleAwareFramer{f: framer}
 	var sid spdy.StreamId
 	var rid spdy.StreamId
 	var pid uint32
@@ -82,7 +113,7 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 
 	session := &Connection{
 		conn:   conn,
-		framer: framer,
+		framer: idleAwareFramer,
 
 		closeChan:     make(chan bool),
 		goAwayTimeout: time.Duration(0),
@@ -99,6 +130,7 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 
 		shutdownChan: make(chan error),
 	}
+	idleAwareFramer.conn = session
 
 	return session, nil
 }
@@ -666,6 +698,13 @@ func (s *Connection) NotifyClose(c chan<- *Stream, timeout time.Duration) {
 // wait forever, which is the default.
 func (s *Connection) SetCloseTimeout(timeout time.Duration) {
 	s.closeTimeout = timeout
+}
+
+// SetIdleTimeout sets the amount of time the connection may sit idle before
+// it is forcefully terminated.
+func (s *Connection) SetIdleTimeout(timeout time.Duration) {
+	s.idleTimeout = timeout
+	s.conn.SetDeadline(time.Now().Add(s.idleTimeout))
 }
 
 func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) error {
