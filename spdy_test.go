@@ -398,6 +398,103 @@ func TestCloseNotification(t *testing.T) {
 	}
 }
 
+func TestIdleNoData(t *testing.T) {
+	var wg sync.WaitGroup
+	server, listen, serverErr := runServer(&wg)
+	if serverErr != nil {
+		t.Fatalf("Error initializing server: %s", serverErr)
+	}
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	spdyConn.SetIdleTimeout(100 * time.Millisecond)
+	select {
+	case <-spdyConn.CloseChan():
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("Timed out waiting for idle connection closure")
+	}
+
+	closeErr := server.Close()
+	if closeErr != nil {
+		t.Fatalf("Error shutting down server: %s", closeErr)
+	}
+	wg.Wait()
+}
+
+func TestIdleWithData(t *testing.T) {
+	var wg sync.WaitGroup
+	server, listen, serverErr := runServer(&wg)
+	if serverErr != nil {
+		t.Fatalf("Error initializing server: %s", serverErr)
+	}
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	spdyConn.SetIdleTimeout(25 * time.Millisecond)
+
+	stream, err := spdyConn.CreateStream(http.Header{}, nil, false)
+	if err != nil {
+		t.Fatalf("Error creating stream: %v", err)
+	}
+
+	writeCh := make(chan struct{})
+
+	go func() {
+		b := []byte{1, 2, 3, 4, 5}
+		for i := 0; i < 10; i++ {
+			_, err = stream.Write(b)
+			if err != nil {
+				t.Fatalf("Error writing to stream: %v", err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		close(writeCh)
+	}()
+
+	writesFinished := false
+
+	expired := time.NewTimer(200 * time.Millisecond)
+
+Loop:
+	for {
+		select {
+		case <-writeCh:
+			writesFinished = true
+		case <-spdyConn.CloseChan():
+			if !writesFinished {
+				t.Fatal("Connection closed before all writes finished")
+			}
+			break Loop
+		case <-expired.C:
+			t.Fatal("Timed out waiting for idle connection closure")
+		}
+	}
+
+	closeErr := server.Close()
+	if closeErr != nil {
+		t.Fatalf("Error shutting down server: %s", closeErr)
+	}
+	wg.Wait()
+}
+
 var authenticated bool
 
 func authStreamHandler(stream *Stream) {
