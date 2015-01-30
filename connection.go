@@ -704,7 +704,11 @@ func (s *Connection) SetCloseTimeout(timeout time.Duration) {
 // it is forcefully terminated.
 func (s *Connection) SetIdleTimeout(timeout time.Duration) {
 	s.idleTimeout = timeout
-	s.conn.SetDeadline(time.Now().Add(s.idleTimeout))
+	if timeout > 0 {
+		s.conn.SetDeadline(time.Now().Add(s.idleTimeout))
+	} else {
+		s.conn.SetDeadline(time.Time{})
+	}
 }
 
 func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) error {
