@@ -398,6 +398,70 @@ func TestCloseNotification(t *testing.T) {
 	}
 }
 
+func TestIdleNoTimeoutSet(t *testing.T) {
+	var wg sync.WaitGroup
+	server, listen, serverErr := runServer(&wg)
+	if serverErr != nil {
+		t.Fatalf("Error initializing server: %s", serverErr)
+	}
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	select {
+	case <-spdyConn.CloseChan():
+		t.Fatal("Unexpected connection closure")
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	closeErr := server.Close()
+	if closeErr != nil {
+		t.Fatalf("Error shutting down server: %s", closeErr)
+	}
+	wg.Wait()
+}
+
+func TestIdleClearTimeout(t *testing.T) {
+	var wg sync.WaitGroup
+	server, listen, serverErr := runServer(&wg)
+	if serverErr != nil {
+		t.Fatalf("Error initializing server: %s", serverErr)
+	}
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	spdyConn.SetIdleTimeout(10 * time.Millisecond)
+	spdyConn.SetIdleTimeout(0)
+	select {
+	case <-spdyConn.CloseChan():
+		t.Fatal("Unexpected connection closure")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	closeErr := server.Close()
+	if closeErr != nil {
+		t.Fatalf("Error shutting down server: %s", closeErr)
+	}
+	wg.Wait()
+}
+
 func TestIdleNoData(t *testing.T) {
 	var wg sync.WaitGroup
 	server, listen, serverErr := runServer(&wg)
@@ -416,10 +480,10 @@ func TestIdleNoData(t *testing.T) {
 	}
 	go spdyConn.Serve(NoOpStreamHandler)
 
-	spdyConn.SetIdleTimeout(100 * time.Millisecond)
+	spdyConn.SetIdleTimeout(10 * time.Millisecond)
 	select {
 	case <-spdyConn.CloseChan():
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(20 * time.Millisecond):
 		t.Fatal("Timed out waiting for idle connection closure")
 	}
 
