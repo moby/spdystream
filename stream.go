@@ -33,6 +33,9 @@ type Stream struct {
 	replyCond  *sync.Cond
 	replied    bool
 	closeChan  chan bool
+
+	shutdownLock sync.Mutex
+	shutdownChan chan struct{} // closed when Reset is called (no more R/W).
 }
 
 // WriteData writes data to stream, sending a dataframe per call
@@ -166,6 +169,16 @@ func (s *Stream) Close() error {
 // Reset sends a reset frame, putting the stream into the fully closed state.
 func (s *Stream) Reset() error {
 	s.conn.removeStream(s)
+
+	// only close it once.
+	s.shutdownLock.Lock()
+	select {
+	case <-s.shutdownChan:
+		// already was closed.
+	default:
+		close(s.shutdownChan)
+	}
+	s.shutdownLock.Unlock()
 
 	s.finishLock.Lock()
 	if s.finished {
