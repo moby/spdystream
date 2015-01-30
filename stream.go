@@ -1,7 +1,6 @@
 package spdystream
 
 import (
-	"code.google.com/p/go.net/spdy"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"code.google.com/p/go.net/spdy"
 )
 
 var (
@@ -32,6 +33,7 @@ type Stream struct {
 	finished   bool
 	replyCond  *sync.Cond
 	replied    bool
+	closeLock  sync.Mutex
 	closeChan  chan bool
 }
 
@@ -175,15 +177,7 @@ func (s *Stream) Reset() error {
 	s.finished = true
 	s.finishLock.Unlock()
 
-	s.dataLock.Lock()
-	select {
-	case <-s.closeChan:
-		break
-	default:
-		close(s.dataChan)
-		close(s.closeChan)
-	}
-	s.dataLock.Unlock()
+	s.closeRemoteChannels()
 
 	resetFrame := &spdy.RstStreamFrame{
 		StreamId: s.streamId,
@@ -318,4 +312,17 @@ func (s *Stream) SetReadDeadline(t time.Time) error {
 
 func (s *Stream) SetWriteDeadline(t time.Time) error {
 	return s.conn.conn.SetWriteDeadline(t)
+}
+
+func (s *Stream) closeRemoteChannels() {
+	s.closeLock.Lock()
+	defer s.closeLock.Unlock()
+	select {
+	case <-s.closeChan:
+	default:
+		close(s.closeChan)
+		s.dataLock.Lock()
+		defer s.dataLock.Unlock()
+		close(s.dataChan)
+	}
 }

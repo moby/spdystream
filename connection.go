@@ -29,8 +29,60 @@ type StreamHandler func(stream *Stream)
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
 
 type idleAwareFramer struct {
-	f    *spdy.Framer
-	conn *Connection
+	f       *spdy.Framer
+	conn    *Connection
+	expired *time.Timer
+	startCh chan struct{}
+}
+
+func newIdleAwareFramer(framer *spdy.Framer) *idleAwareFramer {
+	iaf := &idleAwareFramer{
+		f:       framer,
+		startCh: make(chan struct{}, 1),
+	}
+	go iaf.monitor()
+	return iaf
+}
+
+func (i *idleAwareFramer) monitor() {
+	// wait for a non-zero timeout
+	<-i.startCh
+
+Loop:
+	for {
+		select {
+		case <-i.startCh:
+			// no-op
+		case <-i.expired.C:
+			for _, stream := range i.conn.streams {
+				stream.Reset()
+			}
+			i.conn.Close()
+			break Loop
+		case <-i.conn.closeChan:
+			break Loop
+		}
+	}
+}
+
+func (i *idleAwareFramer) setTimeout(timeout time.Duration) {
+	switch {
+	case timeout == 0:
+		if i.expired != nil {
+			i.expired.Stop()
+		}
+	case timeout > 0:
+		// TODO there may be a race condition with multiple goroutines calling this,
+		// as there's no lock around i.expired. A lock would probably result in
+		// decreased performance, but that needs to be explored.
+		if i.expired == nil {
+			i.expired = time.NewTimer(timeout)
+			// tell the monitor it can start waiting for a timeout
+			i.startCh <- struct{}{}
+		} else {
+			i.expired.Reset(timeout)
+		}
+	}
 }
 
 func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
@@ -40,7 +92,7 @@ func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
 	}
 
 	if i.conn.idleTimeout > 0 {
-		i.conn.conn.SetDeadline(time.Now().Add(i.conn.idleTimeout))
+		i.setTimeout(i.conn.idleTimeout)
 	}
 	return nil
 }
@@ -52,7 +104,7 @@ func (i *idleAwareFramer) ReadFrame() (spdy.Frame, error) {
 	}
 
 	if i.conn.idleTimeout > 0 {
-		i.conn.conn.SetDeadline(time.Now().Add(i.conn.idleTimeout))
+		i.setTimeout(i.conn.idleTimeout)
 	}
 	return frame, nil
 }
@@ -94,7 +146,7 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 	if framerErr != nil {
 		return nil, framerErr
 	}
-	idleAwareFramer := &idleAwareFramer{f: framer}
+	idleAwareFramer := newIdleAwareFramer(framer)
 	var sid spdy.StreamId
 	var rid spdy.StreamId
 	var pid uint32
@@ -245,12 +297,7 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 	// notify streams that they're now closed, which will
 	// unblock any stream Read() calls
 	for _, stream := range s.streams {
-		select {
-		case <-stream.closeChan:
-			// do nothing, stream is already closed
-		default:
-			close(stream.closeChan)
-		}
+		stream.closeRemoteChannels()
 	}
 	s.streams = make(map[spdy.StreamId]*Stream)
 	s.streamCond.Broadcast()
@@ -317,8 +364,7 @@ func (s *Connection) addStreamFrame(frame *spdy.SynStreamFrame) {
 		closeChan:  make(chan bool),
 	}
 	if frame.CFHeader.Flags&spdy.ControlFlagFin != 0x00 {
-		close(stream.dataChan)
-		close(stream.closeChan)
+		stream.closeRemoteChannels()
 	}
 
 	s.addStream(stream)
@@ -388,15 +434,7 @@ func (s *Connection) handleResetFrame(frame *spdy.RstStreamFrame) error {
 		return nil
 	}
 	s.removeStream(stream)
-	stream.dataLock.Lock()
-	select {
-	case <-stream.closeChan:
-		break
-	default:
-		close(stream.dataChan)
-		close(stream.closeChan)
-	}
-	stream.dataLock.Unlock()
+	stream.closeRemoteChannels()
 
 	if !stream.replied {
 		stream.replied = true
@@ -455,10 +493,8 @@ func (s *Connection) handleDataFrame(frame *spdy.DataFrame) error {
 		stream.dataLock.RLock()
 		select {
 		case <-stream.closeChan:
-			break
-		default:
-			debugMessage("(%p) (%d) Data frame send chan", stream, stream.streamId)
-			stream.dataChan <- frame.Data
+			debugMessage("(%p) (%d) Data frame not sent (stream shut down)", stream, stream.streamId)
+		case stream.dataChan <- frame.Data:
 			debugMessage("(%p) (%d) Data frame sent", stream, stream.streamId)
 		}
 		stream.dataLock.RUnlock()
@@ -506,16 +542,7 @@ func (s *Connection) handleGoAwayFrame(frame *spdy.GoAwayFrame) error {
 }
 
 func (s *Connection) remoteStreamFinish(stream *Stream) {
-	// synchronize closing channel
-	stream.dataLock.Lock()
-	select {
-	case <-stream.closeChan:
-		break
-	default:
-		close(stream.dataChan)
-		close(stream.closeChan)
-	}
-	stream.dataLock.Unlock()
+	stream.closeRemoteChannels()
 
 	stream.finishLock.Lock()
 	if stream.finished {
@@ -704,11 +731,7 @@ func (s *Connection) SetCloseTimeout(timeout time.Duration) {
 // it is forcefully terminated.
 func (s *Connection) SetIdleTimeout(timeout time.Duration) {
 	s.idleTimeout = timeout
-	if timeout > 0 {
-		s.conn.SetDeadline(time.Now().Add(s.idleTimeout))
-	} else {
-		s.conn.SetDeadline(time.Time{})
-	}
+	s.framer.setTimeout(timeout)
 }
 
 func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) error {

@@ -514,6 +514,7 @@ func TestIdleWithData(t *testing.T) {
 
 	spdyConn.SetIdleTimeout(25 * time.Millisecond)
 
+	authenticated = true
 	stream, err := spdyConn.CreateStream(http.Header{}, nil, false)
 	if err != nil {
 		t.Fatalf("Error creating stream: %v", err)
@@ -550,6 +551,154 @@ Loop:
 		case <-expired.C:
 			t.Fatal("Timed out waiting for idle connection closure")
 		}
+	}
+
+	closeErr := server.Close()
+	if closeErr != nil {
+		t.Fatalf("Error shutting down server: %s", closeErr)
+	}
+	wg.Wait()
+}
+
+func TestHalfClosedIdleTimeout(t *testing.T) {
+	listener, listenErr := net.Listen("tcp", "localhost:0")
+	if listenErr != nil {
+		t.Fatalf("Error listening: %v", listenErr)
+	}
+	listen := listener.Addr().String()
+
+	var serverConn net.Conn
+	var serverSpdyConn *Connection
+	var err error
+	go func() {
+		serverConn, err = listener.Accept()
+		if err != nil {
+			t.Fatalf("Error accepting: %v", err)
+		}
+
+		serverSpdyConn, err = NewConnection(serverConn, true)
+		if err != nil {
+			t.Fatalf("Error creating server connection: %v", err)
+		}
+		go serverSpdyConn.Serve(func(s *Stream) {
+			s.SendReply(http.Header{}, true)
+		})
+		serverSpdyConn.SetIdleTimeout(10 * time.Millisecond)
+	}()
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	stream, err := spdyConn.CreateStream(http.Header{}, nil, false)
+	if err != nil {
+		t.Fatalf("Error creating stream: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	stream.Reset()
+
+	err = spdyConn.Close()
+	if err != nil {
+		t.Fatalf("Error closing client spdy conn: %v", err)
+	}
+}
+
+func TestStreamReset(t *testing.T) {
+	var wg sync.WaitGroup
+	server, listen, serverErr := runServer(&wg)
+	if serverErr != nil {
+		t.Fatalf("Error initializing server: %s", serverErr)
+	}
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	authenticated = true
+	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
+	if streamErr != nil {
+		t.Fatalf("Error creating stream: %s", streamErr)
+	}
+
+	buf := []byte("dskjahfkdusahfkdsahfkdsafdkas")
+	for i := 0; i < 10; i++ {
+		if _, err := stream.Write(buf); err != nil {
+			t.Fatalf("Error writing to stream: %s", err)
+		}
+	}
+	for i := 0; i < 10; i++ {
+		if _, err := stream.Read(buf); err != nil {
+			t.Fatalf("Error reading from stream: %s", err)
+		}
+	}
+
+	// fmt.Printf("Resetting...\n")
+	if err := stream.Reset(); err != nil {
+		t.Fatalf("Error reseting stream: %s", err)
+	}
+
+	closeErr := server.Close()
+	if closeErr != nil {
+		t.Fatalf("Error shutting down server: %s", closeErr)
+	}
+	wg.Wait()
+}
+
+func TestStreamResetWithDataRemaining(t *testing.T) {
+	var wg sync.WaitGroup
+	server, listen, serverErr := runServer(&wg)
+	if serverErr != nil {
+		t.Fatalf("Error initializing server: %s", serverErr)
+	}
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	authenticated = true
+	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
+	if streamErr != nil {
+		t.Fatalf("Error creating stream: %s", streamErr)
+	}
+
+	buf := []byte("dskjahfkdusahfkdsahfkdsafdkas")
+	for i := 0; i < 10; i++ {
+		if _, err := stream.Write(buf); err != nil {
+			t.Fatalf("Error writing to stream: %s", err)
+		}
+	}
+
+	// read a bit to make sure a goroutine gets to <-dataChan
+	if _, err := stream.Read(buf); err != nil {
+		t.Fatalf("Error reading from stream: %s", err)
+	}
+
+	// fmt.Printf("Resetting...\n")
+	if err := stream.Reset(); err != nil {
+		t.Fatalf("Error reseting stream: %s", err)
 	}
 
 	closeErr := server.Close()
