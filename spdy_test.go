@@ -345,23 +345,20 @@ func TestCloseNotification(t *testing.T) {
 	}
 	listen := listener.Addr().String()
 
-	var serverConn net.Conn
-	var serverSpdyConn *Connection
-	var err error
-	closeChan := make(chan struct{}, 1)
+	serverConnChan := make(chan net.Conn)
 	go func() {
-		serverConn, err = listener.Accept()
+		serverConn, err := listener.Accept()
 		if err != nil {
 			t.Fatalf("Error accepting: %v", err)
 		}
 
-		serverSpdyConn, err = NewConnection(serverConn, true)
+		serverSpdyConn, err := NewConnection(serverConn, true)
 		if err != nil {
 			t.Fatalf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(NoOpStreamHandler)
 		<-serverSpdyConn.CloseChan()
-		close(closeChan)
+		serverConnChan <- serverConn
 	}()
 
 	conn, dialErr := net.Dial("tcp", listen)
@@ -376,13 +373,14 @@ func TestCloseNotification(t *testing.T) {
 	go spdyConn.Serve(NoOpStreamHandler)
 
 	// close client conn
-	err = conn.Close()
+	err := conn.Close()
 	if err != nil {
 		t.Fatalf("Error closing client connection: %v", err)
 	}
 
+	var serverConn net.Conn
 	select {
-	case <-closeChan:
+	case serverConn = <-serverConnChan:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Timed out waiting for connection closed notification")
 	}
@@ -567,16 +565,13 @@ func TestHalfClosedIdleTimeout(t *testing.T) {
 	}
 	listen := listener.Addr().String()
 
-	var serverConn net.Conn
-	var serverSpdyConn *Connection
-	var err error
 	go func() {
-		serverConn, err = listener.Accept()
+		serverConn, err := listener.Accept()
 		if err != nil {
 			t.Fatalf("Error accepting: %v", err)
 		}
 
-		serverSpdyConn, err = NewConnection(serverConn, true)
+		serverSpdyConn, err := NewConnection(serverConn, true)
 		if err != nil {
 			t.Fatalf("Error creating server connection: %v", err)
 		}
