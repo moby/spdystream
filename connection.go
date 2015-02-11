@@ -29,58 +29,59 @@ type StreamHandler func(stream *Stream)
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
 
 type idleAwareFramer struct {
-	f       *spdy.Framer
-	conn    *Connection
-	expired *time.Timer
-	startCh chan struct{}
+	f              *spdy.Framer
+	conn           *Connection
+	resetChan      chan struct{}
+	setTimeoutChan chan time.Duration
+	timeout        time.Duration
 }
 
 func newIdleAwareFramer(framer *spdy.Framer) *idleAwareFramer {
 	iaf := &idleAwareFramer{
-		f:       framer,
-		startCh: make(chan struct{}, 1),
+		f:              framer,
+		resetChan:      make(chan struct{}, 2),
+		setTimeoutChan: make(chan time.Duration),
 	}
-	go iaf.monitor()
 	return iaf
 }
 
 func (i *idleAwareFramer) monitor() {
-	// wait for a non-zero timeout
-	<-i.startCh
-
+	var (
+		timer   *time.Timer
+		expired <-chan time.Time
+	)
 Loop:
 	for {
 		select {
-		case <-i.startCh:
-			// no-op
-		case <-i.expired.C:
+		case timeout := <-i.setTimeoutChan:
+			i.timeout = timeout
+			if timeout == 0 {
+				if timer != nil {
+					timer.Stop()
+				}
+			} else {
+				if timer == nil {
+					timer = time.NewTimer(timeout)
+					expired = timer.C
+				} else {
+					timer.Reset(timeout)
+				}
+			}
+		case <-i.resetChan:
+			if timer != nil && i.timeout > 0 {
+				timer.Reset(i.timeout)
+			}
+		case <-expired:
 			for _, stream := range i.conn.streams {
 				stream.Reset()
 			}
 			i.conn.Close()
 			break Loop
 		case <-i.conn.closeChan:
+			if timer != nil {
+				timer.Stop()
+			}
 			break Loop
-		}
-	}
-}
-
-func (i *idleAwareFramer) setTimeout(timeout time.Duration) {
-	switch {
-	case timeout == 0:
-		if i.expired != nil {
-			i.expired.Stop()
-		}
-	case timeout > 0:
-		// TODO there may be a race condition with multiple goroutines calling this,
-		// as there's no lock around i.expired. A lock would probably result in
-		// decreased performance, but that needs to be explored.
-		if i.expired == nil {
-			i.expired = time.NewTimer(timeout)
-			// tell the monitor it can start waiting for a timeout
-			i.startCh <- struct{}{}
-		} else {
-			i.expired.Reset(timeout)
 		}
 	}
 }
@@ -91,9 +92,8 @@ func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
 		return err
 	}
 
-	if i.conn.idleTimeout > 0 {
-		i.setTimeout(i.conn.idleTimeout)
-	}
+	i.resetChan <- struct{}{}
+
 	return nil
 }
 
@@ -103,9 +103,8 @@ func (i *idleAwareFramer) ReadFrame() (spdy.Frame, error) {
 		return nil, err
 	}
 
-	if i.conn.idleTimeout > 0 {
-		i.setTimeout(i.conn.idleTimeout)
-	}
+	i.resetChan <- struct{}{}
+
 	return frame, nil
 }
 
@@ -119,7 +118,6 @@ type Connection struct {
 	lastStreamChan chan<- *Stream
 	goAwayTimeout  time.Duration
 	closeTimeout   time.Duration
-	idleTimeout    time.Duration
 
 	streamLock *sync.RWMutex
 	streamCond *sync.Cond
@@ -183,6 +181,7 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 		shutdownChan: make(chan error),
 	}
 	idleAwareFramer.conn = session
+	go idleAwareFramer.monitor()
 
 	return session, nil
 }
@@ -730,8 +729,7 @@ func (s *Connection) SetCloseTimeout(timeout time.Duration) {
 // SetIdleTimeout sets the amount of time the connection may sit idle before
 // it is forcefully terminated.
 func (s *Connection) SetIdleTimeout(timeout time.Duration) {
-	s.idleTimeout = timeout
-	s.framer.setTimeout(timeout)
+	s.framer.setTimeoutChan <- timeout
 }
 
 func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) error {
