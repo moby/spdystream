@@ -93,6 +93,12 @@ Loop:
 }
 
 func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
+	select {
+	case <-i.conn.closeChan:
+		return errors.New("error writing frame: connection closed")
+	default:
+	}
+
 	err := i.f.WriteFrame(frame)
 	if err != nil {
 		return err
@@ -104,6 +110,12 @@ func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
 }
 
 func (i *idleAwareFramer) ReadFrame() (spdy.Frame, error) {
+	select {
+	case <-i.conn.closeChan:
+		return nil, errors.New("error reading frame: connection closed")
+	default:
+	}
+
 	frame, err := i.f.ReadFrame()
 	if err != nil {
 		return nil, err
