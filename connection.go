@@ -287,7 +287,10 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 		}(frameQueues[i])
 	}
 
-	var partitionRoundRobin int
+	var (
+		partitionRoundRobin int
+		goAwayFrame         *spdy.GoAwayFrame
+	)
 	for {
 		readFrame, err := s.framer.ReadFrame()
 		if err != nil {
@@ -328,8 +331,8 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			partition = partitionRoundRobin
 			partitionRoundRobin = (partitionRoundRobin + 1) % FRAME_WORKERS
 		case *spdy.GoAwayFrame:
-			// handle to go-away frame synchronously here, then exit the loop
-			s.handleGoAwayFrame(frame)
+			// hold on to the go away frame and exit the loop
+			goAwayFrame = frame
 			break
 		default:
 			priority = 7
@@ -339,10 +342,16 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 		frameQueues[partition].Push(readFrame, priority)
 	}
 	close(s.closeChan)
+
 	// wait for all frame handler workers to indicate they've drained their queues
-	// before closing remote channels and emptying s.streams
+	// before handling the go away frame
 	wg.Wait()
 
+	if goAwayFrame != nil {
+		s.handleGoAwayFrame(goAwayFrame)
+	}
+
+	// now it's safe to close remote channels and empty s.streams
 	s.streamCond.L.Lock()
 	// notify streams that they're now closed, which will
 	// unblock any stream Read() calls
