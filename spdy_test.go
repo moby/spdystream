@@ -3,13 +3,17 @@ package spdystream
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/docker/spdystream/spdy"
 )
 
 func TestSpdyStreams(t *testing.T) {
@@ -875,6 +879,96 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 
 	stream.Reset()
 	conn.Close()
+}
+
+func TestGoAwayRace(t *testing.T) {
+	var done sync.WaitGroup
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("Error listening: %v", err)
+	}
+	listen := listener.Addr().String()
+
+	processDataFrame := make(chan struct{})
+	serverClosed := make(chan struct{})
+
+	done.Add(1)
+	go func() {
+		defer done.Done()
+		serverConn, err := listener.Accept()
+		if err != nil {
+			t.Fatalf("Error accepting: %v", err)
+		}
+
+		serverSpdyConn, err := NewConnection(serverConn, true)
+		if err != nil {
+			t.Fatalf("Error creating server connection: %v", err)
+		}
+		go func() {
+			<-serverSpdyConn.CloseChan()
+			close(serverClosed)
+		}()
+
+		// force the data frame handler to sleep before delivering the frame
+		serverSpdyConn.dataFrameHandler = func(frame *spdy.DataFrame) error {
+			<-processDataFrame
+			return serverSpdyConn.handleDataFrame(frame)
+		}
+
+		streamCh := make(chan *Stream)
+		go serverSpdyConn.Serve(func(s *Stream) {
+			s.SendReply(http.Header{}, false)
+			streamCh <- s
+		})
+
+		stream, ok := <-streamCh
+		if !ok {
+			t.Fatalf("didn't get a stream")
+		}
+		stream.Close()
+		data, err := ioutil.ReadAll(stream)
+		if err != nil {
+			t.Error(err)
+		}
+		if e, a := "hello1hello2hello3hello4hello5", string(data); e != a {
+			t.Errorf("Expected %q, got %q", e, a)
+		}
+	}()
+
+	dialConn, err := net.Dial("tcp", listen)
+	if err != nil {
+		t.Fatalf("Error dialing server: %s", err)
+	}
+	conn, err := NewConnection(dialConn, false)
+	if err != nil {
+		t.Fatalf("Error creating client connectin: %v", err)
+	}
+	go conn.Serve(NoOpStreamHandler)
+
+	stream, err := conn.CreateStream(http.Header{}, nil, false)
+	if err != nil {
+		t.Fatalf("error creating client stream: %s", err)
+	}
+	if err := stream.Wait(); err != nil {
+		t.Fatalf("error waiting for stream creation: %v", err)
+	}
+
+	fmt.Fprint(stream, "hello1")
+	fmt.Fprint(stream, "hello2")
+	fmt.Fprint(stream, "hello3")
+	fmt.Fprint(stream, "hello4")
+	fmt.Fprint(stream, "hello5")
+
+	stream.Close()
+	conn.Close()
+
+	// wait for the server to get the go away frame
+	<-serverClosed
+
+	// allow the data frames to be delivered to the server's stream
+	close(processDataFrame)
+
+	done.Wait()
 }
 
 var authenticated bool

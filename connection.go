@@ -174,6 +174,9 @@ type Connection struct {
 	shutdownLock sync.Mutex
 	shutdownChan chan error
 	hasShutdown  bool
+
+	// for testing https://github.com/docker/spdystream/pull/56
+	dataFrameHandler func(*spdy.DataFrame) error
 }
 
 // NewConnection creates a new spdy connection from an existing
@@ -219,6 +222,7 @@ func NewConnection(conn net.Conn, server bool) (*Connection, error) {
 
 		shutdownChan: make(chan error),
 	}
+	session.dataFrameHandler = session.handleDataFrame
 	idleAwareFramer.conn = session
 	go idleAwareFramer.monitor()
 
@@ -297,7 +301,7 @@ func (s *Connection) Serve(newHandler StreamHandler) {
 			if err != io.EOF {
 				fmt.Errorf("frame read error: %s", err)
 			} else {
-				debugMessage("(%q) EOF received", s)
+				debugMessage("(%p) EOF received", s)
 			}
 			break
 		}
@@ -377,7 +381,7 @@ func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler Str
 		case *spdy.SynReplyFrame:
 			frameErr = s.handleReplyFrame(frame)
 		case *spdy.DataFrame:
-			frameErr = s.handleDataFrame(frame)
+			frameErr = s.dataFrameHandler(frame)
 		case *spdy.RstStreamFrame:
 			frameErr = s.handleResetFrame(frame)
 		case *spdy.HeadersFrame:
