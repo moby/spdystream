@@ -971,6 +971,49 @@ func TestGoAwayRace(t *testing.T) {
 	done.Wait()
 }
 
+func TestSetIdleTimeoutAfterRemoteConnectionClosed(t *testing.T) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("Error listening: %v", err)
+	}
+	listen := listener.Addr().String()
+
+	serverConns := make(chan *Connection, 1)
+	go func() {
+		conn, connErr := listener.Accept()
+		if connErr != nil {
+			t.Fatal(connErr)
+		}
+		serverSpdyConn, err := NewConnection(conn, true)
+		if err != nil {
+			t.Fatalf("Error creating server connection: %v", err)
+		}
+		go serverSpdyConn.Serve(NoOpStreamHandler)
+		serverConns <- serverSpdyConn
+	}()
+
+	conn, dialErr := net.Dial("tcp", listen)
+	if dialErr != nil {
+		t.Fatalf("Error dialing server: %s", dialErr)
+	}
+
+	spdyConn, spdyErr := NewConnection(conn, false)
+	if spdyErr != nil {
+		t.Fatalf("Error creating spdy connection: %s", spdyErr)
+	}
+	go spdyConn.Serve(NoOpStreamHandler)
+
+	if err := spdyConn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	serverConn := <-serverConns
+	defer serverConn.Close()
+	<-serverConn.closeChan
+
+	serverConn.SetIdleTimeout(10 * time.Second)
+}
+
 var authenticated bool
 
 func authStreamHandler(stream *Stream) {
