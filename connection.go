@@ -451,6 +451,7 @@ func (s *Connection) addStreamFrame(frame *spdy.SynStreamFrame) {
 		dataChan:   make(chan []byte),
 		headerChan: make(chan http.Header),
 		closeChan:  make(chan bool),
+		priority:   frame.Priority,
 	}
 	if frame.CFHeader.Flags&spdy.ControlFlagFin != 0x00 {
 		stream.closeRemoteChannels()
