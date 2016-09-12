@@ -325,7 +325,7 @@ Loop:
 		readFrame, err := s.framer.ReadFrame()
 		if err != nil {
 			if err != io.EOF {
-				fmt.Errorf("frame read error: %s", err)
+				fmt.Printf("frame read error: %s", err)
 			} else {
 				debugMessage("(%p) EOF received", s)
 			}
@@ -421,7 +421,7 @@ func (s *Connection) frameHandler(frameQueue *PriorityFrameQueue, newHandler Str
 		}
 
 		if frameErr != nil {
-			fmt.Errorf("frame handling error: %s", frameErr)
+			fmt.Printf("frame handling error: %s\n", frameErr)
 		}
 	}
 }
@@ -473,7 +473,7 @@ func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
 		go func() {
 			resetErr := s.sendResetFrame(spdy.ProtocolError, frame.StreamId)
 			if resetErr != nil {
-				fmt.Errorf("reset error: %s", resetErr)
+				fmt.Printf("reset error: %s", resetErr)
 			}
 		}()
 		return false
@@ -718,7 +718,7 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 			select {
 			case err, ok := <-s.shutdownChan:
 				if ok {
-					fmt.Errorf("Unhandled close error after %s: %s", duration, err)
+					fmt.Printf("Unhandled close error after %s: %s", duration, err)
 				}
 			default:
 			}
