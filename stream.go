@@ -320,8 +320,10 @@ func (s *Stream) closeRemoteChannels() {
 	s.closeLock.Lock()
 	defer s.closeLock.Unlock()
 	select {
-	case <-s.closeChan:
+	case _, ok := <-s.closeChan:
+		if ok {
+			close(s.closeChan)
+		}
 	default:
-		close(s.closeChan)
 	}
 }
