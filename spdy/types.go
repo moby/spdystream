@@ -21,13 +21,13 @@ type ControlFrameType uint16
 
 const (
 	TypeSynStream    ControlFrameType = 0x0001
-	TypeSynReply                      = 0x0002
-	TypeRstStream                     = 0x0003
-	TypeSettings                      = 0x0004
-	TypePing                          = 0x0006
-	TypeGoAway                        = 0x0007
-	TypeHeaders                       = 0x0008
-	TypeWindowUpdate                  = 0x0009
+	TypeSynReply     ControlFrameType = 0x0002
+	TypeRstStream    ControlFrameType = 0x0003
+	TypeSettings     ControlFrameType = 0x0004
+	TypePing         ControlFrameType = 0x0006
+	TypeGoAway       ControlFrameType = 0x0007
+	TypeHeaders      ControlFrameType = 0x0008
+	TypeWindowUpdate ControlFrameType = 0x0009
 )
 
 // ControlFlags are the flags that can be set on a control frame.
@@ -35,8 +35,8 @@ type ControlFlags uint8
 
 const (
 	ControlFlagFin                   ControlFlags = 0x01
-	ControlFlagUnidirectional                     = 0x02
-	ControlFlagSettingsClearSettings              = 0x01
+	ControlFlagUnidirectional        ControlFlags = 0x02
+	ControlFlagSettingsClearSettings ControlFlags = 0x01
 )
 
 // DataFlags are the flags that can be set on a data frame.
@@ -124,7 +124,7 @@ type SettingsFlag uint8
 
 const (
 	FlagSettingsPersistValue SettingsFlag = 0x1
-	FlagSettingsPersisted                 = 0x2
+	FlagSettingsPersisted    SettingsFlag = 0x2
 )
 
 // SettingsFlag represents the id of an id/value pair in a SETTINGS frame.
@@ -208,13 +208,13 @@ type ErrorCode string
 
 const (
 	UnlowercasedHeaderName     ErrorCode = "header was not lowercased"
-	DuplicateHeaders                     = "multiple headers with same name"
-	WrongCompressedPayloadSize           = "compressed payload size was incorrect"
-	UnknownFrameType                     = "unknown frame type"
-	InvalidControlFrame                  = "invalid control frame"
-	InvalidDataFrame                     = "invalid data frame"
-	InvalidHeaderPresent                 = "frame contained invalid header"
-	ZeroStreamId                         = "stream id zero is disallowed"
+	DuplicateHeaders           ErrorCode = "multiple headers with same name"
+	WrongCompressedPayloadSize ErrorCode = "compressed payload size was incorrect"
+	UnknownFrameType           ErrorCode = "unknown frame type"
+	InvalidControlFrame        ErrorCode = "invalid control frame"
+	InvalidDataFrame           ErrorCode = "invalid data frame"
+	InvalidHeaderPresent       ErrorCode = "frame contained invalid header"
+	ZeroStreamId               ErrorCode = "stream id zero is disallowed"
 )
 
 // Error contains both the type of error and additional values. StreamId is 0
