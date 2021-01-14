@@ -284,7 +284,7 @@ func (s *Connection) Ping() (time.Duration, error) {
 		}
 		break
 	}
-	return time.Now().Sub(startTime), nil
+	return time.Since(startTime), nil
 }
 
 // Serve handles frames sent from the server, including reply frames
@@ -727,8 +727,6 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 		s.shutdownChan <- err
 	}
 	close(s.shutdownChan)
-
-	return
 }
 
 // Closes spdy connection by sending GoAway frame and initiating shutdown

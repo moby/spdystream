@@ -102,7 +102,7 @@ func TestSpdyStreamOverWs(t *testing.T) {
 	if n != 5 {
 		t.Fatalf("Unexpected number of bytes read:\nActual: %d\nExpected: 5", n)
 	}
-	if bytes.Compare(buf[:n], message) != 0 {
+	if !bytes.Equal(buf[:n], message) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpectd: %s", buf, message)
 	}
 
@@ -119,7 +119,7 @@ func TestSpdyStreamOverWs(t *testing.T) {
 	if n != 3 {
 		t.Fatalf("Unexpected number of bytes read:\nActual: %d\nExpected: 3", n)
 	}
-	if bytes.Compare(smallBuf[:n], []byte("hel")) != 0 {
+	if !bytes.Equal(smallBuf[:n], []byte("hel")) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpectd: %s", smallBuf[:n], message)
 	}
 	n, readErr = stream.Read(smallBuf)
@@ -129,7 +129,7 @@ func TestSpdyStreamOverWs(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("Unexpected number of bytes read:\nActual: %d\nExpected: 2", n)
 	}
-	if bytes.Compare(smallBuf[:n], []byte("lo")) != 0 {
+	if !bytes.Equal(smallBuf[:n], []byte("lo")) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpected: lo", smallBuf[:n])
 	}
 

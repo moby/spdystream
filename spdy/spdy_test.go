@@ -342,6 +342,9 @@ func TestCreateParseHeadersFrameCompressionEnable(t *testing.T) {
 	headersFrame.Headers = HeadersFixture
 
 	framer, err := NewFramer(buffer, buffer)
+	if err != nil {
+		t.Fatal("Failed to create new framer:", err)
+	}
 	if err := framer.WriteFrame(&headersFrame); err != nil {
 		t.Fatal("WriteFrame with compression:", err)
 	}
@@ -519,10 +522,10 @@ func TestMultipleSPDYFrames(t *testing.T) {
 	// Start the goroutines to write the frames.
 	go func() {
 		if err := writer.WriteFrame(&headersFrame); err != nil {
-			t.Fatal("WriteFrame (HEADERS): ", err)
+			t.Error("WriteFrame (HEADERS):", err)
 		}
 		if err := writer.WriteFrame(&synStreamFrame); err != nil {
-			t.Fatal("WriteFrame (SYN_STREAM): ", err)
+			t.Error("WriteFrame (SYN_STREAM):", err)
 		}
 	}()
 
@@ -611,8 +614,7 @@ var streamIdZeroFrames = map[string]zeroStream{
 }
 
 func TestNoZeroStreamId(t *testing.T) {
-	t.Log("skipping") // TODO: update to work with SPDY3
-	return
+	t.Skip("TODO: update to work with SPDY3")
 
 	for name, f := range streamIdZeroFrames {
 		b, err := base64.StdEncoding.DecodeString(f.encoded)
