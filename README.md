@@ -74,4 +74,4 @@ func main() {
 
 ## Copyright and license
 
-Code and documentation copyright 2013-2014 Docker, inc. Code released under the Apache 2.0 license.
+Copyright 2013-2021 Docker, inc. Released under the [Apache 2.0 license](LICENSE).
