@@ -17,10 +17,16 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Install Go
-      uses: actions/setup-go@v1
+      uses: actions/setup-go@v2
       with:
         go-version: ${{ matrix.go-version }}
     - name: Checkout code
       uses: actions/checkout@v2
+    - name: Validate headers
+      run: |
+        pushd $(mktemp -d) \
+        && go get -u github.com/kunalkushwaha/ltag \
+        && popd \
+        && ./scripts/validate/fileheader
     - name: Test
       run: go test -v ./...
