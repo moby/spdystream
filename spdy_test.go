@@ -59,7 +59,7 @@ func TestSpdyStreams(t *testing.T) {
 	if n != 5 {
 		t.Fatalf("Unexpected number of bytes read:\nActual: %d\nExpected: 5", n)
 	}
-	if bytes.Compare(buf[:n], message) != 0 {
+	if !bytes.Equal(buf[:n], message) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpectd: %s", buf, message)
 	}
 
@@ -95,7 +95,7 @@ func TestSpdyStreams(t *testing.T) {
 	if n != 3 {
 		t.Fatalf("Unexpected number of bytes read:\nActual: %d\nExpected: 3", n)
 	}
-	if bytes.Compare(smallBuf[:n], []byte("hel")) != 0 {
+	if !bytes.Equal(smallBuf[:n], []byte("hel")) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpectd: %s", smallBuf[:n], message)
 	}
 	n, readErr = stream.Read(smallBuf)
@@ -105,7 +105,7 @@ func TestSpdyStreams(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("Unexpected number of bytes read:\nActual: %d\nExpected: 2", n)
 	}
-	if bytes.Compare(smallBuf[:n], []byte("lo")) != 0 {
+	if !bytes.Equal(smallBuf[:n], []byte("lo")) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpected: lo", smallBuf[:n])
 	}
 
@@ -239,7 +239,7 @@ func TestHalfClose(t *testing.T) {
 	if n != 31 {
 		t.Fatalf("Unexpected number of bytes read:\nActual: %d\nExpected: 5", n)
 	}
-	if bytes.Compare(buf[:n], message) != 0 {
+	if !bytes.Equal(buf[:n], message) {
 		t.Fatalf("Did not receive expected message:\nActual: %s\nExpectd: %s", buf, message)
 	}
 
@@ -275,7 +275,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 		go func() {
 			serverConn, connErr = listener.Accept()
 			if connErr != nil {
-				t.Fatalf("Error accepting: %v", connErr)
+				t.Errorf("Error accepting: %v", connErr)
 			}
 
 			serverSpdyConn, _ := NewConnection(serverConn, true)
@@ -323,11 +323,9 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 			t.Fatalf("Error shutting down server: %s", closeErr)
 		}
 
-		select {
-		case e := <-streamch:
-			if e == nil || e != io.EOF {
-				t.Fatalf("(%d) Expected to get an EOF stream error", tix)
-			}
+		e := <-streamch
+		if e == nil || e != io.EOF {
+			t.Fatalf("(%d) Expected to get an EOF stream error", tix)
 		}
 
 		closeErr = conn.Close()
@@ -353,12 +351,12 @@ func TestCloseNotification(t *testing.T) {
 	go func() {
 		serverConn, err := listener.Accept()
 		if err != nil {
-			t.Fatalf("Error accepting: %v", err)
+			t.Errorf("Error accepting: %v", err)
 		}
 
 		serverSpdyConn, err := NewConnection(serverConn, true)
 		if err != nil {
-			t.Fatalf("Error creating server connection: %v", err)
+			t.Errorf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(NoOpStreamHandler)
 		<-serverSpdyConn.CloseChan()
@@ -382,10 +380,7 @@ func TestCloseNotification(t *testing.T) {
 		t.Fatalf("Error closing client connection: %v", err)
 	}
 
-	var serverConn net.Conn
-	select {
-	case serverConn = <-serverConnChan:
-	}
+	serverConn := <-serverConnChan
 
 	err = serverConn.Close()
 	if err != nil {
@@ -566,7 +561,7 @@ func TestIdleWithData(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			_, err = stream.Write(b)
 			if err != nil {
-				t.Fatalf("Error writing to stream: %v", err)
+				t.Errorf("Error writing to stream: %v", err)
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -643,12 +638,12 @@ func TestHalfClosedIdleTimeout(t *testing.T) {
 	go func() {
 		serverConn, err := listener.Accept()
 		if err != nil {
-			t.Fatalf("Error accepting: %v", err)
+			t.Errorf("Error accepting: %v", err)
 		}
 
 		serverSpdyConn, err := NewConnection(serverConn, true)
 		if err != nil {
-			t.Fatalf("Error creating server connection: %v", err)
+			t.Errorf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(func(s *Stream) {
 			s.SendReply(http.Header{}, true)
@@ -850,6 +845,9 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 	}
 
 	conn, err := NewConnection(rt.conn, false)
+	if err != nil {
+		t.Fatal("Error creating spdy connection:", err)
+	}
 	go conn.Serve(NoOpStreamHandler)
 
 	stream, err := conn.CreateStream(http.Header{}, nil, false)
@@ -897,12 +895,12 @@ func TestGoAwayRace(t *testing.T) {
 		defer done.Done()
 		serverConn, err := listener.Accept()
 		if err != nil {
-			t.Fatalf("Error accepting: %v", err)
+			t.Errorf("Error accepting: %v", err)
 		}
 
 		serverSpdyConn, err := NewConnection(serverConn, true)
 		if err != nil {
-			t.Fatalf("Error creating server connection: %v", err)
+			t.Errorf("Error creating server connection: %v", err)
 		}
 		go func() {
 			<-serverSpdyConn.CloseChan()
@@ -923,7 +921,7 @@ func TestGoAwayRace(t *testing.T) {
 
 		stream, ok := <-streamCh
 		if !ok {
-			t.Fatalf("didn't get a stream")
+			t.Errorf("didn't get a stream")
 		}
 		stream.Close()
 		data, err := ioutil.ReadAll(stream)
@@ -982,11 +980,11 @@ func TestSetIdleTimeoutAfterRemoteConnectionClosed(t *testing.T) {
 	go func() {
 		conn, connErr := listener.Accept()
 		if connErr != nil {
-			t.Fatal(connErr)
+			t.Error(connErr)
 		}
 		serverSpdyConn, err := NewConnection(conn, true)
 		if err != nil {
-			t.Fatalf("Error creating server connection: %v", err)
+			t.Errorf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(NoOpStreamHandler)
 		serverConns <- serverSpdyConn
@@ -1025,11 +1023,11 @@ func TestClientConnectionStopsServingAfterGoAway(t *testing.T) {
 	go func() {
 		conn, connErr := listener.Accept()
 		if connErr != nil {
-			t.Fatal(connErr)
+			t.Error(connErr)
 		}
 		serverSpdyConn, err := NewConnection(conn, true)
 		if err != nil {
-			t.Fatalf("Error creating server connection: %v", err)
+			t.Errorf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(NoOpStreamHandler)
 		serverConns <- serverSpdyConn
@@ -1058,7 +1056,7 @@ func TestClientConnectionStopsServingAfterGoAway(t *testing.T) {
 	go func() {
 		_, err := ioutil.ReadAll(stream)
 		if err != nil {
-			t.Fatalf("Error reading stream: %v", err)
+			t.Errorf("Error reading stream: %v", err)
 		}
 		close(readChan)
 	}()
@@ -1083,11 +1081,11 @@ func TestStreamReadUnblocksAfterCloseThenReset(t *testing.T) {
 	go func() {
 		conn, connErr := listener.Accept()
 		if connErr != nil {
-			t.Fatal(connErr)
+			t.Error(connErr)
 		}
 		serverSpdyConn, err := NewConnection(conn, true)
 		if err != nil {
-			t.Fatalf("Error creating server connection: %v", err)
+			t.Errorf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(NoOpStreamHandler)
 		serverConns <- serverSpdyConn
@@ -1116,7 +1114,7 @@ func TestStreamReadUnblocksAfterCloseThenReset(t *testing.T) {
 	go func() {
 		_, err := ioutil.ReadAll(stream)
 		if err != nil {
-			t.Fatalf("Error reading stream: %v", err)
+			t.Errorf("Error reading stream: %v", err)
 		}
 		close(readChan)
 	}()

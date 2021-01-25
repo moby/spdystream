@@ -103,12 +103,12 @@ Loop:
 			//
 			// See https://github.com/docker/spdystream/issues/49 for more details.
 			go func() {
-				for _ = range resetChan {
+				for range resetChan {
 				}
 			}()
 
 			go func() {
-				for _ = range setTimeoutChan {
+				for range setTimeoutChan {
 				}
 			}()
 
@@ -127,7 +127,7 @@ Loop:
 	}
 
 	// Drain resetChan
-	for _ = range resetChan {
+	for range resetChan {
 	}
 }
 
@@ -284,7 +284,7 @@ func (s *Connection) Ping() (time.Duration, error) {
 		}
 		break
 	}
-	return time.Now().Sub(startTime), nil
+	return time.Since(startTime), nil
 }
 
 // Serve handles frames sent from the server, including reply frames
@@ -727,8 +727,6 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 		s.shutdownChan <- err
 	}
 	close(s.shutdownChan)
-
-	return
 }
 
 // Closes spdy connection by sending GoAway frame and initiating shutdown
