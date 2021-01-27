@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/spdystream"
+	"github.com/moby/spdystream"
 	"github.com/gorilla/websocket"
 )
 
