@@ -1,4 +1,4 @@
-module github.com/docker/spdystream
+module github.com/moby/spdystream
 
 go 1.13
 

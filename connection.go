@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/spdystream/spdy"
+	"github.com/moby/spdystream/spdy"
 )
 
 var (
@@ -117,7 +117,7 @@ Loop:
 			// attempts to grab the write lock that Write() already has, causing a
 			// deadlock.
 			//
-			// See https://github.com/docker/spdystream/issues/49 for more details.
+			// See https://github.com/moby/spdystream/issues/49 for more details.
 			go func() {
 				for range resetChan {
 				}
@@ -216,7 +216,7 @@ type Connection struct {
 	shutdownChan chan error
 	hasShutdown  bool
 
-	// for testing https://github.com/docker/spdystream/pull/56
+	// for testing https://github.com/moby/spdystream/pull/56
 	dataFrameHandler func(*spdy.DataFrame) error
 }
 

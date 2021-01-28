@@ -20,7 +20,7 @@ import (
 	"container/heap"
 	"sync"
 
-	"github.com/docker/spdystream/spdy"
+	"github.com/moby/spdystream/spdy"
 )
 
 type prioritizedFrame struct {
