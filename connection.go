@@ -45,13 +45,14 @@ type StreamHandler func(stream *Stream)
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
 
 type idleAwareFramer struct {
-	f              *spdy.Framer
-	conn           *Connection
-	writeLock      sync.Mutex
-	resetChan      chan struct{}
-	setTimeoutLock sync.Mutex
-	setTimeoutChan chan time.Duration
-	timeout        time.Duration
+	f                *spdy.Framer
+	conn             *Connection
+	writeLock        sync.Mutex
+	resetChan        chan struct{}
+	setTimeoutLock   sync.Mutex
+	setTimeoutChan   chan time.Duration
+	timeout          time.Duration
+	ignorePingFrames bool
 }
 
 func newIdleAwareFramer(framer *spdy.Framer) *idleAwareFramer {
@@ -158,6 +159,13 @@ func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
 		return err
 	}
 
+	if i.ignorePingFrames {
+		_, ok := frame.(*spdy.PingFrame)
+		if ok {
+			return nil
+		}
+	}
+
 	i.resetChan <- struct{}{}
 
 	return nil
@@ -169,18 +177,26 @@ func (i *idleAwareFramer) ReadFrame() (spdy.Frame, error) {
 		return nil, err
 	}
 
+	if i.ignorePingFrames {
+		_, ok := frame.(*spdy.PingFrame)
+		if ok {
+			return frame, nil
+		}
+	}
+
 	// resetChan should never be closed since it is only closed
 	// when the connection has closed its closeChan. This closure
 	// only occurs after all Reads have finished
 	// TODO (dmcgowan): refactor relationship into connection
 	i.resetChan <- struct{}{}
-
 	return frame, nil
 }
 
-func (i *idleAwareFramer) setIdleTimeout(timeout time.Duration) {
+func (i *idleAwareFramer) setIdleTimeout(timeout time.Duration, ignorePingFrames bool) {
 	i.setTimeoutLock.Lock()
 	defer i.setTimeoutLock.Unlock()
+
+	i.ignorePingFrames = ignorePingFrames
 
 	if i.setTimeoutChan == nil {
 		return
@@ -834,7 +850,13 @@ func (s *Connection) SetCloseTimeout(timeout time.Duration) {
 // SetIdleTimeout sets the amount of time the connection may sit idle before
 // it is forcefully terminated.
 func (s *Connection) SetIdleTimeout(timeout time.Duration) {
-	s.framer.setIdleTimeout(timeout)
+	s.framer.setIdleTimeout(timeout, false)
+}
+
+// SetUserIdleTimeout sets the amount of time the connection may sit idle,
+// not taking into account SPDY Ping frames, before it is forcefully terminated
+func (s *Connection) SetUserIdleTimeout(timeout time.Duration) {
+	s.framer.setIdleTimeout(timeout, true)
 }
 
 func (s *Connection) sendHeaders(headers http.Header, stream *Stream, fin bool) error {
