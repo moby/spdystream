@@ -50,7 +50,9 @@ func TestSpdyStreams(t *testing.T) {
 	}
 	go spdyConn.Serve(NoOpStreamHandler)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 	if streamErr != nil {
 		t.Fatalf("Error creating stream: %s", streamErr)
@@ -144,7 +146,9 @@ func TestSpdyStreams(t *testing.T) {
 		t.Fatalf("Error reseting stream: %s", streamResetErr)
 	}
 
+	authMu.Lock()
 	authenticated = false
+	authMu.Unlock()
 	badStream, badStreamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 	if badStreamErr != nil {
 		t.Fatalf("Error creating stream: %s", badStreamErr)
@@ -225,7 +229,9 @@ func TestHalfClose(t *testing.T) {
 	}
 	go spdyConn.Serve(NoOpStreamHandler)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 	if streamErr != nil {
 		t.Fatalf("Error creating stream: %s", streamErr)
@@ -311,7 +317,9 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 		}
 		go spdyConn.Serve(NoOpStreamHandler)
 
+		authMu.Lock()
 		authenticated = true
+		authMu.Unlock()
 		stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 		if streamErr != nil {
 			t.Fatalf("Error creating stream: %s", streamErr)
@@ -427,7 +435,9 @@ func TestIdleShutdownRace(t *testing.T) {
 	}
 	go spdyConn.Serve(NoOpStreamHandler)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	stream, err := spdyConn.CreateStream(http.Header{}, nil, false)
 	if err != nil {
 		t.Fatalf("Error creating stream: %v", err)
@@ -592,7 +602,9 @@ func TestIdleWithData(t *testing.T) {
 
 	spdyConn.SetIdleTimeout(25 * time.Millisecond)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	stream, err := spdyConn.CreateStream(http.Header{}, nil, false)
 	if err != nil {
 		t.Fatalf("Error creating stream: %v", err)
@@ -654,7 +666,9 @@ func TestIdleWithPing(t *testing.T) {
 
 	spdyConn.SetIdleTimeout(25 * time.Millisecond)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	_, err := spdyConn.CreateStream(http.Header{}, nil, false)
 	if err != nil {
 		t.Fatalf("Error creating stream: %v", err)
@@ -719,7 +733,9 @@ func TestUserIdleWithPing(t *testing.T) {
 
 	spdyConn.SetUserIdleTimeout(25 * time.Millisecond)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	_, err := spdyConn.CreateStream(http.Header{}, nil, false)
 	if err != nil {
 		t.Fatalf("Error creating stream: %v", err)
@@ -788,8 +804,9 @@ func TestIdleRace(t *testing.T) {
 
 	spdyConn.SetIdleTimeout(10 * time.Millisecond)
 
+	authMu.Lock()
 	authenticated = true
-
+	authMu.Unlock()
 	for i := 0; i < 10; i++ {
 		_, err := spdyConn.CreateStream(http.Header{}, nil, false)
 		if err != nil {
@@ -873,7 +890,9 @@ func TestStreamReset(t *testing.T) {
 	}
 	go spdyConn.Serve(NoOpStreamHandler)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 	if streamErr != nil {
 		t.Fatalf("Error creating stream: %s", streamErr)
@@ -921,7 +940,9 @@ func TestStreamResetWithDataRemaining(t *testing.T) {
 	}
 	go spdyConn.Serve(NoOpStreamHandler)
 
+	authMu.Lock()
 	authenticated = true
+	authMu.Unlock()
 	stream, streamErr := spdyConn.CreateStream(http.Header{}, nil, false)
 	if streamErr != nil {
 		t.Fatalf("Error creating stream: %s", streamErr)
@@ -1316,12 +1337,16 @@ func TestStreamReadUnblocksAfterCloseThenReset(t *testing.T) {
 }
 
 var authenticated bool
+var authMu sync.Mutex
 
 func authStreamHandler(stream *Stream) {
+	authMu.Lock()
 	if !authenticated {
+		authMu.Unlock()
 		stream.Refuse()
 		return
 	}
+	authMu.Unlock()
 	MirrorStreamHandler(stream)
 }
 
