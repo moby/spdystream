@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/moby/spdystream/spdy"
@@ -40,6 +41,25 @@ const (
 	QUEUE_SIZE    = 50
 )
 
+// atomicBool uses load/store operations on an int32 to simulate an atomic boolean.
+type atomicBool struct {
+	v int32
+}
+
+// set sets the int32 to the given boolean.
+func (a *atomicBool) set(value bool) {
+	if value {
+		atomic.StoreInt32(&a.v, 1)
+		return
+	}
+	atomic.StoreInt32(&a.v, 0)
+}
+
+// get returns true if the int32 == 1
+func (a *atomicBool) get() bool {
+	return atomic.LoadInt32(&a.v) == 1
+}
+
 type StreamHandler func(stream *Stream)
 
 type AuthHandler func(header http.Header, slot uint8, parent uint32) bool
@@ -52,7 +72,7 @@ type idleAwareFramer struct {
 	setTimeoutLock   sync.Mutex
 	setTimeoutChan   chan time.Duration
 	timeout          time.Duration
-	ignorePingFrames bool
+	ignorePingFrames *atomicBool
 }
 
 func newIdleAwareFramer(framer *spdy.Framer) *idleAwareFramer {
@@ -61,7 +81,8 @@ func newIdleAwareFramer(framer *spdy.Framer) *idleAwareFramer {
 		resetChan: make(chan struct{}, 2),
 		// setTimeoutChan needs to be buffered to avoid deadlocks when calling setIdleTimeout at about
 		// the same time the connection is being closed
-		setTimeoutChan: make(chan time.Duration, 1),
+		setTimeoutChan:   make(chan time.Duration, 1),
+		ignorePingFrames: &atomicBool{0},
 	}
 	return iaf
 }
@@ -159,7 +180,7 @@ func (i *idleAwareFramer) WriteFrame(frame spdy.Frame) error {
 		return err
 	}
 
-	if i.ignorePingFrames {
+	if i.ignorePingFrames.get() {
 		_, ok := frame.(*spdy.PingFrame)
 		if ok {
 			return nil
@@ -177,7 +198,7 @@ func (i *idleAwareFramer) ReadFrame() (spdy.Frame, error) {
 		return nil, err
 	}
 
-	if i.ignorePingFrames {
+	if i.ignorePingFrames.get() {
 		_, ok := frame.(*spdy.PingFrame)
 		if ok {
 			return frame, nil
@@ -193,10 +214,10 @@ func (i *idleAwareFramer) ReadFrame() (spdy.Frame, error) {
 }
 
 func (i *idleAwareFramer) setIdleTimeout(timeout time.Duration, ignorePingFrames bool) {
+	i.ignorePingFrames.set(ignorePingFrames)
+
 	i.setTimeoutLock.Lock()
 	defer i.setTimeoutLock.Unlock()
-
-	i.ignorePingFrames = ignorePingFrames
 
 	if i.setTimeoutChan == nil {
 		return
