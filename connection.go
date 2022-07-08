@@ -730,7 +730,7 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 	}
 
 	if err != nil {
-		duration := 10 * time.Minute
+		duration := 5 * time.Second
 		time.AfterFunc(duration, func() {
 			select {
 			case err, ok := <-s.shutdownChan:
