@@ -25,8 +25,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/moby/spdystream"
 	"github.com/gorilla/websocket"
+	"github.com/moby/spdystream"
 )
 
 var upgrader = websocket.Upgrader{
