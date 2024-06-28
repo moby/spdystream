@@ -712,7 +712,9 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 
 	var timeout <-chan time.Time
 	if closeTimeout > time.Duration(0) {
-		timeout = time.After(closeTimeout)
+		timer := time.NewTimer(closeTimeout)
+		defer timer.Stop()
+		timeout = timer.C
 	}
 	streamsClosed := make(chan bool)
 
@@ -806,7 +808,9 @@ func (s *Connection) CloseWait() error {
 func (s *Connection) Wait(waitTimeout time.Duration) error {
 	var timeout <-chan time.Time
 	if waitTimeout > time.Duration(0) {
-		timeout = time.After(waitTimeout)
+		timer := time.NewTimer(waitTimeout)
+		defer timer.Stop()
+		timeout = timer.C
 	}
 
 	select {
