@@ -741,7 +741,15 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 	}
 
 	if err != nil {
-		duration := 10 * time.Minute
+		// default to 1 second
+		duration := time.Second
+		// if a closeTimeout was given, use that, clipped to 1s-10m
+		if closeTimeout > time.Second {
+			duration = closeTimeout
+		}
+		if duration > 10*time.Minute {
+			duration = 10 * time.Minute
+		}
 		timer := time.NewTimer(duration)
 		defer timer.Stop()
 		select {
