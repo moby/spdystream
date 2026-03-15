@@ -13,11 +13,11 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-set -eu -o
+set -eu
 
-if ! command -v ltag; then
+if ! command -v ltag >/dev/null 2>&1; then
 	echo >&2 "ERROR: ltag not found. Install with:"
-	echo >&2 "    go get -u github.com/kunalkushwaha/ltag"
+	echo >&2 "    go install github.com/containerd/ltag@latest"
 	exit 1
 fi
 

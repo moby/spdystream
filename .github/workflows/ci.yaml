@@ -26,7 +26,7 @@ jobs:
     - name: Validate headers
       if: startsWith(matrix.go-version, '1.13') == false
       run: |
-        go install github.com/kunalkushwaha/ltag@latest \
+        go install github.com/containerd/ltag@latest \
         && ./scripts/validate/fileheader
     - name: Test
       run: go test -v ./...
