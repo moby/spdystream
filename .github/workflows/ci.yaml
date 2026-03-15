@@ -17,16 +17,16 @@ jobs:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Install Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go-version }}
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Validate headers
-      if: startsWith(matrix.go-version, '1.13') == false
-      run: |
-        go install github.com/containerd/ltag@latest \
-        && ./scripts/validate/fileheader
-    - name: Test
-      run: go test -v ./...
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Validate headers
+        if: startsWith(matrix.go-version, '1.13') == false
+        run: |
+          go install github.com/containerd/ltag@latest \
+          && ./scripts/validate/fileheader
+      - name: Test
+        run: go test -v ./...
