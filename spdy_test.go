@@ -1153,8 +1153,10 @@ func TestStreamReadUnblocksAfterCloseThenReset(t *testing.T) {
 	}
 }
 
-var authLock sync.RWMutex
-var authenticated bool
+var (
+	authLock      sync.RWMutex
+	authenticated bool
+)
 
 func setAuthenticated(b bool) {
 	authLock.Lock()
@@ -1187,7 +1189,6 @@ func runServer(wg *sync.WaitGroup) (io.Closer, string, error) {
 
 			spdyConn, _ := NewConnection(conn, true)
 			go spdyConn.Serve(authStreamHandler)
-
 		}
 		wg.Done()
 	}()
