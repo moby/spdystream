@@ -913,8 +913,8 @@ func (s *Connection) sendStream(stream *Stream, fin bool) error {
 	}
 
 	streamFrame := &spdy.SynStreamFrame{
-		StreamId:             spdy.StreamId(stream.streamId),
-		AssociatedToStreamId: spdy.StreamId(parentId),
+		StreamId:             stream.streamId,
+		AssociatedToStreamId: parentId,
 		Headers:              stream.headers,
 		CFHeader:             spdy.ControlFrameHeader{Flags: flags},
 	}
