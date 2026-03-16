@@ -82,6 +82,7 @@ func BenchmarkDialWithSPDYStream10000(b *testing.B) {
 }
 
 func benchmarkStreamWithDataAndSize(b *testing.B, size uint64) {
+	b.Helper()
 	server, addr, wg := configureServer()
 
 	defer func() {

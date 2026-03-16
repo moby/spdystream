@@ -848,7 +848,7 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 	server.Start()
 	defer server.Close()
 
-	req, err := http.NewRequest("GET", server.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
 	if err != nil {
 		t.Fatalf("Error creating request: %s", err)
 	}

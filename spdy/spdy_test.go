@@ -638,6 +638,7 @@ func TestNoZeroStreamId(t *testing.T) {
 }
 
 func checkZeroStreamId(t *testing.T, frame string, method string, err error) {
+	t.Helper()
 	if err == nil {
 		t.Errorf("%s ZeroStreamId, no error on %s", method, frame)
 		return
