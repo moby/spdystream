@@ -19,6 +19,7 @@ package spdystream
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -296,7 +297,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 
 			serverSpdyConn, _ := NewConnection(serverConn, true)
 			go serverSpdyConn.Serve(func(stream *Stream) {
-				stream.SendReply(http.Header{}, tc.closeSender)
+				_ = stream.SendReply(http.Header{}, tc.closeSender)
 			})
 		}()
 
@@ -324,7 +325,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 
 		if tc.closeReceiver {
 			// make stream half closed, receive only
-			stream.Close()
+			_ = stream.Close()
 		}
 
 		streamch := make(chan error, 1)
@@ -436,7 +437,7 @@ func TestIdleShutdownRace(t *testing.T) {
 	spdyConn.SetIdleTimeout(5 * time.Millisecond)
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		stream.Reset()
+		_ = stream.Reset()
 	}()
 
 	select {
@@ -662,7 +663,7 @@ func TestHalfClosedIdleTimeout(t *testing.T) {
 			t.Errorf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(func(s *Stream) {
-			s.SendReply(http.Header{}, true)
+			_ = s.SendReply(http.Header{}, true)
 		})
 		serverSpdyConn.SetIdleTimeout(10 * time.Millisecond)
 	}()
@@ -685,7 +686,7 @@ func TestHalfClosedIdleTimeout(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	stream.Reset()
+	_ = stream.Reset()
 
 	err = spdyConn.Close()
 	if err != nil {
@@ -827,17 +828,17 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 		netconn, _, _ := w.(http.Hijacker).Hijack()
 		conn, _ := NewConnection(netconn, true)
 		go conn.Serve(func(s *Stream) {
-			s.SendReply(http.Header{}, false)
+			_ = s.SendReply(http.Header{}, false)
 			streamCh <- s
 		})
 
 		stream := <-streamCh
-		io.Copy(stream, stream)
+		_, _ = io.Copy(stream, stream)
 
 		closeChan := make(chan struct{})
 		go func() {
-			stream.Reset()
-			conn.Close()
+			_ = stream.Reset()
+			_ = conn.Close()
 			close(closeChan)
 		}()
 
@@ -891,8 +892,8 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 		t.Fatalf("expected '%s', got '%s'", e, a)
 	}
 
-	stream.Reset()
-	conn.Close()
+	_ = stream.Reset()
+	_ = conn.Close()
 }
 
 func TestGoAwayRace(t *testing.T) {
@@ -931,7 +932,7 @@ func TestGoAwayRace(t *testing.T) {
 
 		streamCh := make(chan *Stream)
 		go serverSpdyConn.Serve(func(s *Stream) {
-			s.SendReply(http.Header{}, false)
+			_ = s.SendReply(http.Header{}, false)
 			streamCh <- s
 		})
 
@@ -939,7 +940,7 @@ func TestGoAwayRace(t *testing.T) {
 		if !ok {
 			t.Errorf("didn't get a stream")
 		}
-		stream.Close()
+		_ = stream.Close()
 		data, err := ioutil.ReadAll(stream)
 		if err != nil {
 			t.Error(err)
@@ -967,14 +968,14 @@ func TestGoAwayRace(t *testing.T) {
 		t.Fatalf("error waiting for stream creation: %v", err)
 	}
 
-	fmt.Fprint(stream, "hello1")
-	fmt.Fprint(stream, "hello2")
-	fmt.Fprint(stream, "hello3")
-	fmt.Fprint(stream, "hello4")
-	fmt.Fprint(stream, "hello5")
+	_, _ = fmt.Fprint(stream, "hello1")
+	_, _ = fmt.Fprint(stream, "hello2")
+	_, _ = fmt.Fprint(stream, "hello3")
+	_, _ = fmt.Fprint(stream, "hello4")
+	_, _ = fmt.Fprint(stream, "hello5")
 
-	stream.Close()
-	conn.Close()
+	_ = stream.Close()
+	_ = conn.Close()
 
 	// wait for the server to get the go away frame
 	<-serverClosed
@@ -1022,7 +1023,7 @@ func TestSetIdleTimeoutAfterRemoteConnectionClosed(t *testing.T) {
 	}
 
 	serverConn := <-serverConns
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 	<-serverConn.closeChan
 
 	serverConn.SetIdleTimeout(10 * time.Second)
@@ -1078,7 +1079,7 @@ func TestClientConnectionStopsServingAfterGoAway(t *testing.T) {
 	}()
 
 	serverConn := <-serverConns
-	serverConn.Close()
+	_ = serverConn.Close()
 
 	// make sure the client conn breaks out of the main loop in Serve()
 	<-spdyConn.closeChan
@@ -1136,7 +1137,7 @@ func TestStreamReadUnblocksAfterCloseThenReset(t *testing.T) {
 	}()
 
 	serverConn := <-serverConns
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
@@ -1168,7 +1169,7 @@ func authStreamHandler(stream *Stream) {
 	authLock.RLock()
 	defer authLock.RUnlock()
 	if !authenticated {
-		stream.Refuse()
+		_ = stream.Refuse()
 		return
 	}
 	MirrorStreamHandler(stream)

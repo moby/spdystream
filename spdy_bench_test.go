@@ -41,7 +41,7 @@ func BenchmarkDial10000(b *testing.B) {
 	server, addr, wg := configureServer()
 
 	defer func() {
-		server.Close()
+		_ = server.Close()
 		wg.Wait()
 	}()
 
@@ -50,7 +50,7 @@ func BenchmarkDial10000(b *testing.B) {
 		if dialErr != nil {
 			panic(fmt.Sprintf("Error dialing server: %s", dialErr))
 		}
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 
@@ -58,7 +58,7 @@ func BenchmarkDialWithSPDYStream10000(b *testing.B) {
 	server, addr, wg := configureServer()
 
 	defer func() {
-		server.Close()
+		_ = server.Close()
 		wg.Wait()
 	}()
 
@@ -81,11 +81,11 @@ func BenchmarkDialWithSPDYStream10000(b *testing.B) {
 	}
 }
 
-func benchmarkStreamWithDataAndSize(size uint64, b *testing.B) {
+func benchmarkStreamWithDataAndSize(b *testing.B, size uint64) {
 	server, addr, wg := configureServer()
 
 	defer func() {
-		server.Close()
+		_ = server.Close()
 		wg.Wait()
 	}()
 
@@ -103,19 +103,17 @@ func benchmarkStreamWithDataAndSize(size uint64, b *testing.B) {
 		go spdyConn.Serve(MirrorStreamHandler)
 
 		stream, err := spdyConn.CreateStream(http.Header{}, nil, false)
-
-		writer := make([]byte, size)
-
-		stream.Write(writer)
-
 		if err != nil {
 			panic(err)
 		}
 
-		reader := make([]byte, size)
-		stream.Read(reader)
+		writer := make([]byte, size)
 
-		stream.Close()
+		_, _ = stream.Write(writer)
+
+		reader := make([]byte, size)
+		_, _ = stream.Read(reader)
+		_ = stream.Close()
 
 		closeErr := spdyConn.Close()
 		if closeErr != nil {
@@ -124,6 +122,6 @@ func benchmarkStreamWithDataAndSize(size uint64, b *testing.B) {
 	}
 }
 
-func BenchmarkStreamWith1Byte10000(b *testing.B)     { benchmarkStreamWithDataAndSize(1, b) }
-func BenchmarkStreamWith1KiloByte10000(b *testing.B) { benchmarkStreamWithDataAndSize(1024, b) }
-func BenchmarkStreamWith1Megabyte10000(b *testing.B) { benchmarkStreamWithDataAndSize(1024*1024, b) }
+func BenchmarkStreamWith1Byte10000(b *testing.B)     { benchmarkStreamWithDataAndSize(b, 1) }
+func BenchmarkStreamWith1KiloByte10000(b *testing.B) { benchmarkStreamWithDataAndSize(b, 1024) }
+func BenchmarkStreamWith1Megabyte10000(b *testing.B) { benchmarkStreamWithDataAndSize(b, 1024*1024) }
