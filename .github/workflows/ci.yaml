@@ -1,11 +1,16 @@
-name: Continuous Integration
+name: CI
 
-on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on: [push, pull_request]
+
+env:
+  GOTOOLCHAIN: local
 
 jobs:
   test:
@@ -13,20 +18,20 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        go-version: [1.13.x, 1.21.x, 1.22.x]
+        go-version: [1.13.x, oldstable, stable]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Install Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go-version }}
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Validate headers
-      if: startsWith(matrix.go-version, '1.13') == false
-      run: |
-        go install github.com/containerd/ltag@latest \
-        && ./scripts/validate/fileheader
-    - name: Test
-      run: go test -v ./...
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Validate headers
+        if: startsWith(matrix.go-version, '1.13') == false
+        run: |
+          go install github.com/containerd/ltag@latest \
+          && ./scripts/validate/fileheader
+      - name: Test
+        run: go test -race -v ./...
