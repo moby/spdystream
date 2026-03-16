@@ -152,6 +152,7 @@ func writeControlFrameHeader(w io.Writer, h ControlFrameHeader) error {
 	return nil
 }
 
+//nolint:unparam // result n is never used
 func writeHeaderValueBlock(w io.Writer, h http.Header) (n int, err error) {
 	n = 0
 	if err = binary.Write(w, binary.BigEndian, uint32(len(h))); err != nil {
