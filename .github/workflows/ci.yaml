@@ -13,6 +13,21 @@ env:
   GOTOOLCHAIN: local
 
 jobs:
+  lint:
+    name: Golang-CI Lint
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          args: --verbose --show-stats
   test:
     name: Unit test
     timeout-minutes: 10

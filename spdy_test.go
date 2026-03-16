@@ -19,6 +19,7 @@ package spdystream
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -80,7 +81,7 @@ func TestSpdyStreams(t *testing.T) {
 	}
 
 	headers := http.Header{
-		"TestKey": []string{"TestVal"},
+		"Test-Key": []string{"TestVal"},
 	}
 	sendErr := stream.SendHeader(headers, false)
 	if sendErr != nil {
@@ -93,7 +94,7 @@ func TestSpdyStreams(t *testing.T) {
 	if len(receiveHeaders) != 1 {
 		t.Fatalf("Unexpected number of headers:\nActual: %d\nExpecting:%d", len(receiveHeaders), 1)
 	}
-	testVal := receiveHeaders.Get("TestKey")
+	testVal := receiveHeaders.Get("Test-Key")
 	if testVal != "TestVal" {
 		t.Fatalf("Wrong test value:\nActual: %q\nExpecting: %q", testVal, "TestVal")
 	}
@@ -126,7 +127,7 @@ func TestSpdyStreams(t *testing.T) {
 	}
 
 	n, readErr = stream.Read(buf)
-	if readErr != io.EOF {
+	if !errors.Is(readErr, io.EOF) {
 		t.Fatalf("Expected EOF reading from finished stream, read %d bytes", n)
 	}
 
@@ -135,7 +136,7 @@ func TestSpdyStreams(t *testing.T) {
 	if streamCloseErr == nil {
 		t.Fatalf("No error closing finished stream")
 	}
-	if streamCloseErr != ErrWriteClosedStream {
+	if !errors.Is(streamCloseErr, ErrWriteClosedStream) {
 		t.Fatalf("Unexpected error closing stream: %s", streamCloseErr)
 	}
 
@@ -154,7 +155,7 @@ func TestSpdyStreams(t *testing.T) {
 	if waitErr == nil {
 		t.Fatalf("Did not receive error creating stream")
 	}
-	if waitErr != ErrReset {
+	if !errors.Is(waitErr, ErrReset) {
 		t.Fatalf("Unexpected error creating stream: %s", waitErr)
 	}
 	streamCloseErr = badStream.Close()
@@ -296,7 +297,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 
 			serverSpdyConn, _ := NewConnection(serverConn, true)
 			go serverSpdyConn.Serve(func(stream *Stream) {
-				stream.SendReply(http.Header{}, tc.closeSender)
+				_ = stream.SendReply(http.Header{}, tc.closeSender)
 			})
 		}()
 
@@ -324,7 +325,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 
 		if tc.closeReceiver {
 			// make stream half closed, receive only
-			stream.Close()
+			_ = stream.Close()
 		}
 
 		streamch := make(chan error, 1)
@@ -340,7 +341,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 		}
 
 		e := <-streamch
-		if e == nil || e != io.EOF {
+		if e == nil || !errors.Is(e, io.EOF) {
 			t.Fatalf("(%d) Expected to get an EOF stream error", tix)
 		}
 
@@ -436,7 +437,7 @@ func TestIdleShutdownRace(t *testing.T) {
 	spdyConn.SetIdleTimeout(5 * time.Millisecond)
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		stream.Reset()
+		_ = stream.Reset()
 	}()
 
 	select {
@@ -662,7 +663,7 @@ func TestHalfClosedIdleTimeout(t *testing.T) {
 			t.Errorf("Error creating server connection: %v", err)
 		}
 		go serverSpdyConn.Serve(func(s *Stream) {
-			s.SendReply(http.Header{}, true)
+			_ = s.SendReply(http.Header{}, true)
 		})
 		serverSpdyConn.SetIdleTimeout(10 * time.Millisecond)
 	}()
@@ -685,7 +686,7 @@ func TestHalfClosedIdleTimeout(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	stream.Reset()
+	_ = stream.Reset()
 
 	err = spdyConn.Close()
 	if err != nil {
@@ -824,20 +825,20 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 
 		w.WriteHeader(http.StatusSwitchingProtocols)
 
-		netconn, _, _ := w.(http.Hijacker).Hijack()
+		netconn, _, _ := w.(http.Hijacker).Hijack() //nolint:forcetypeassert
 		conn, _ := NewConnection(netconn, true)
 		go conn.Serve(func(s *Stream) {
-			s.SendReply(http.Header{}, false)
+			_ = s.SendReply(http.Header{}, false)
 			streamCh <- s
 		})
 
 		stream := <-streamCh
-		io.Copy(stream, stream)
+		_, _ = io.Copy(stream, stream)
 
 		closeChan := make(chan struct{})
 		go func() {
-			stream.Reset()
-			conn.Close()
+			_ = stream.Reset()
+			_ = conn.Close()
 			close(closeChan)
 		}()
 
@@ -847,7 +848,7 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 	server.Start()
 	defer server.Close()
 
-	req, err := http.NewRequest("GET", server.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
 	if err != nil {
 		t.Fatalf("Error creating request: %s", err)
 	}
@@ -855,10 +856,11 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 	rt := &roundTripper{}
 	client := &http.Client{Transport: rt}
 
-	_, err = client.Do(req)
+	r, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error from client.Do: %s", err)
 	}
+	defer func() { _ = r.Body.Close() }()
 
 	conn, err := NewConnection(rt.conn, false)
 	if err != nil {
@@ -891,8 +893,8 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 		t.Fatalf("expected '%s', got '%s'", e, a)
 	}
 
-	stream.Reset()
-	conn.Close()
+	_ = stream.Reset()
+	_ = conn.Close()
 }
 
 func TestGoAwayRace(t *testing.T) {
@@ -931,7 +933,7 @@ func TestGoAwayRace(t *testing.T) {
 
 		streamCh := make(chan *Stream)
 		go serverSpdyConn.Serve(func(s *Stream) {
-			s.SendReply(http.Header{}, false)
+			_ = s.SendReply(http.Header{}, false)
 			streamCh <- s
 		})
 
@@ -939,7 +941,7 @@ func TestGoAwayRace(t *testing.T) {
 		if !ok {
 			t.Errorf("didn't get a stream")
 		}
-		stream.Close()
+		_ = stream.Close()
 		data, err := ioutil.ReadAll(stream)
 		if err != nil {
 			t.Error(err)
@@ -967,14 +969,14 @@ func TestGoAwayRace(t *testing.T) {
 		t.Fatalf("error waiting for stream creation: %v", err)
 	}
 
-	fmt.Fprint(stream, "hello1")
-	fmt.Fprint(stream, "hello2")
-	fmt.Fprint(stream, "hello3")
-	fmt.Fprint(stream, "hello4")
-	fmt.Fprint(stream, "hello5")
+	_, _ = fmt.Fprint(stream, "hello1")
+	_, _ = fmt.Fprint(stream, "hello2")
+	_, _ = fmt.Fprint(stream, "hello3")
+	_, _ = fmt.Fprint(stream, "hello4")
+	_, _ = fmt.Fprint(stream, "hello5")
 
-	stream.Close()
-	conn.Close()
+	_ = stream.Close()
+	_ = conn.Close()
 
 	// wait for the server to get the go away frame
 	<-serverClosed
@@ -1022,7 +1024,7 @@ func TestSetIdleTimeoutAfterRemoteConnectionClosed(t *testing.T) {
 	}
 
 	serverConn := <-serverConns
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 	<-serverConn.closeChan
 
 	serverConn.SetIdleTimeout(10 * time.Second)
@@ -1078,7 +1080,7 @@ func TestClientConnectionStopsServingAfterGoAway(t *testing.T) {
 	}()
 
 	serverConn := <-serverConns
-	serverConn.Close()
+	_ = serverConn.Close()
 
 	// make sure the client conn breaks out of the main loop in Serve()
 	<-spdyConn.closeChan
@@ -1136,7 +1138,7 @@ func TestStreamReadUnblocksAfterCloseThenReset(t *testing.T) {
 	}()
 
 	serverConn := <-serverConns
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
@@ -1153,8 +1155,10 @@ func TestStreamReadUnblocksAfterCloseThenReset(t *testing.T) {
 	}
 }
 
-var authLock sync.RWMutex
-var authenticated bool
+var (
+	authLock      sync.RWMutex
+	authenticated bool
+)
 
 func setAuthenticated(b bool) {
 	authLock.Lock()
@@ -1166,7 +1170,7 @@ func authStreamHandler(stream *Stream) {
 	authLock.RLock()
 	defer authLock.RUnlock()
 	if !authenticated {
-		stream.Refuse()
+		_ = stream.Refuse()
 		return
 	}
 	MirrorStreamHandler(stream)
@@ -1187,7 +1191,6 @@ func runServer(wg *sync.WaitGroup) (io.Closer, string, error) {
 
 			spdyConn, _ := NewConnection(conn, true)
 			go spdyConn.Serve(authStreamHandler)
-
 		}
 		wg.Done()
 	}()

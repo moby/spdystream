@@ -1,0 +1,65 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - canonicalheader
+    - errcheck
+    - errorlint
+    - forcetypeassert
+    - gocritic
+    - godoclint
+    - nakedret
+    - perfsprint
+    - staticcheck
+    - thelper
+    - unconvert
+    - unparam
+    - whitespace
+  exclusions:
+    generated: disable
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: spdy/
+        linters:
+          - nakedret
+          - nonamedreturns
+      - path: connection.go
+        linters:
+          - unparam
+        text: "result 0 \\(error\\) is always nil" # TODO(thaJeztah): check if errors should be returned
+  settings:
+    revive:
+      rules:
+        # https://github.com/mgechev/revive/blob/HEAD/RULES_DESCRIPTIONS.md#var-naming
+        - name: var-naming
+          severity: warning
+          disabled: false
+          exclude: [""]
+          arguments:
+            - ["Id"] # AllowList
+            - [] # DenyList
+            - - skip-initialism-name-checks: true
+                upper-case-const: true
+    staticcheck:
+      # Enable all options, with some exceptions.
+      # For defaults, see https://golangci-lint.run/usage/linters/#staticcheck
+      checks:
+        - all
+        - -QF1008     # Omit embedded fields from selector expression; https://staticcheck.dev/docs/checks/#QF1008
+        - -ST1003     # Poorly chosen identifier; https://staticcheck.dev/docs/checks/#ST1003
+
+formatters:
+  enable:
+    - gofumpt
+  exclusions:
+    generated: disable
+
+issues:
+  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
+  max-issues-per-linter: 0
+
+  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
+  max-same-issues: 0
