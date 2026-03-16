@@ -29,10 +29,10 @@ import (
 )
 
 var (
-	ErrInvalidStreamId   = errors.New("Invalid stream id")      // ErrInvalidStreamId is returned when an operation refers to a stream with an invalid or unknown stream ID.
-	ErrTimeout           = errors.New("Timeout occurred")       // ErrTimeout is returned when a stream or connection operation exceeds its configured timeout.
-	ErrReset             = errors.New("Stream reset")           // ErrReset is returned when a stream is reset by the peer or by the local endpoint.
-	ErrWriteClosedStream = errors.New("Write on closed stream") // ErrWriteClosedStream is returned when attempting to write to a stream that has already been closed.
+	ErrInvalidStreamId   = errors.New("invalid stream id")      // ErrInvalidStreamId is returned when an operation refers to a stream with an invalid or unknown stream ID.
+	ErrTimeout           = errors.New("timeout occurred")       // ErrTimeout is returned when a stream or connection operation exceeds its configured timeout.
+	ErrReset             = errors.New("stream reset")           // ErrReset is returned when a stream is reset by the peer or by the local endpoint.
+	ErrWriteClosedStream = errors.New("write on closed stream") // ErrWriteClosedStream is returned when attempting to write to a stream that has already been closed.
 )
 
 const (
@@ -506,7 +506,7 @@ func (s *Connection) checkStreamFrame(frame *spdy.SynStreamFrame) bool {
 func (s *Connection) handleStreamFrame(frame *spdy.SynStreamFrame, newHandler StreamHandler) error {
 	stream, ok := s.getStream(frame.StreamId)
 	if !ok {
-		return fmt.Errorf("Missing stream: %d", frame.StreamId)
+		return fmt.Errorf("missing stream: %d", frame.StreamId)
 	}
 
 	newHandler(stream)
@@ -679,7 +679,7 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 
 	streamId := s.getNextStreamId()
 	if streamId == 0 {
-		return nil, fmt.Errorf("Unable to get new stream id")
+		return nil, fmt.Errorf("unable to get new stream id")
 	}
 
 	stream := &Stream{
