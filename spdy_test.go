@@ -825,7 +825,7 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 
 		w.WriteHeader(http.StatusSwitchingProtocols)
 
-		netconn, _, _ := w.(http.Hijacker).Hijack()
+		netconn, _, _ := w.(http.Hijacker).Hijack() //nolint:forcetypeassert
 		conn, _ := NewConnection(netconn, true)
 		go conn.Serve(func(s *Stream) {
 			_ = s.SendReply(http.Header{}, false)

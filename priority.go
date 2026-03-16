@@ -47,7 +47,7 @@ func (fq frameQueue) Swap(i, j int) {
 }
 
 func (fq *frameQueue) Push(x interface{}) {
-	*fq = append(*fq, x.(*prioritizedFrame))
+	*fq = append(*fq, x.(*prioritizedFrame)) //nolint:forcetypeassert
 }
 
 func (fq *frameQueue) Pop() interface{} {
@@ -101,7 +101,7 @@ func (q *PriorityFrameQueue) Pop() spdy.Frame {
 		}
 		q.c.Wait()
 	}
-	frame := heap.Pop(q.queue).(*prioritizedFrame).frame
+	frame := heap.Pop(q.queue).(*prioritizedFrame).frame //nolint:forcetypeassert
 	q.c.Signal()
 	return frame
 }
