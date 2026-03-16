@@ -85,7 +85,7 @@ func (s *Stream) Write(data []byte) (n int, err error) {
 	if err == nil {
 		n = len(data)
 	}
-	return
+	return n, err
 }
 
 // Read reads bytes from a stream, a single read will never get more
@@ -109,7 +109,7 @@ func (s *Stream) Read(p []byte) (n int, err error) {
 	} else {
 		s.unread = nil
 	}
-	return
+	return n, nil
 }
 
 // ReadData reads an entire data frame and returns the byte array

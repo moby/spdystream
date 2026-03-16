@@ -967,7 +967,7 @@ func (s *Connection) getStream(streamId spdy.StreamId) (stream *Stream, ok bool)
 	s.streamLock.RLock()
 	stream, ok = s.streams[streamId]
 	s.streamLock.RUnlock()
-	return
+	return stream, ok
 }
 
 // FindStream looks up the given stream id and either waits for the
