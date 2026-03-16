@@ -679,7 +679,7 @@ func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool)
 
 	streamId := s.getNextStreamId()
 	if streamId == 0 {
-		return nil, fmt.Errorf("unable to get new stream id")
+		return nil, errors.New("unable to get new stream id")
 	}
 
 	stream := &Stream{

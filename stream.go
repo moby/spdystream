@@ -274,11 +274,11 @@ func (s *Stream) ReceiveHeader() (http.Header, error) {
 		break
 	case header, ok := <-s.headerChan:
 		if !ok {
-			return nil, fmt.Errorf("header chan closed")
+			return nil, errors.New("header chan closed")
 		}
 		return header, nil
 	}
-	return nil, fmt.Errorf("stream closed")
+	return nil, errors.New("stream closed")
 }
 
 // Parent returns the parent stream
