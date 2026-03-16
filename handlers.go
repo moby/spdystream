@@ -29,8 +29,8 @@ func MirrorStreamHandler(stream *Stream) {
 	}
 
 	go func() {
-		io.Copy(stream, stream)
-		stream.Close()
+		_, _ = io.Copy(stream, stream)
+		_ = stream.Close()
 	}()
 	go func() {
 		for {
@@ -48,5 +48,5 @@ func MirrorStreamHandler(stream *Stream) {
 
 // NoOpStreamHandler does nothing when stream connects.
 func NoOpStreamHandler(stream *Stream) {
-	stream.SendReply(http.Header{}, false)
+	_ = stream.SendReply(http.Header{}, false)
 }

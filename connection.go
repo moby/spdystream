@@ -101,9 +101,9 @@ Loop:
 			i.conn.streamCond.L.Unlock()
 			go func() {
 				for _, stream := range streams {
-					stream.resetStream()
+					_ = stream.resetStream()
 				}
-				i.conn.Close()
+				_ = i.conn.Close()
 			}()
 		case <-i.conn.closeChan:
 			if timer != nil {
@@ -399,7 +399,7 @@ Loop:
 	wg.Wait()
 
 	if goAwayFrame != nil {
-		s.handleGoAwayFrame(goAwayFrame)
+		_ = s.handleGoAwayFrame(goAwayFrame)
 	}
 
 	// now it's safe to close remote channels and empty s.streams
