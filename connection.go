@@ -29,10 +29,10 @@ import (
 )
 
 var (
-	ErrInvalidStreamId   = errors.New("Invalid stream id")
-	ErrTimeout           = errors.New("Timeout occurred")
-	ErrReset             = errors.New("Stream reset")
-	ErrWriteClosedStream = errors.New("Write on closed stream")
+	ErrInvalidStreamId   = errors.New("Invalid stream id")      // ErrInvalidStreamId is returned when an operation refers to a stream with an invalid or unknown stream ID.
+	ErrTimeout           = errors.New("Timeout occurred")       // ErrTimeout is returned when a stream or connection operation exceeds its configured timeout.
+	ErrReset             = errors.New("Stream reset")           // ErrReset is returned when a stream is reset by the peer or by the local endpoint.
+	ErrWriteClosedStream = errors.New("Write on closed stream") // ErrWriteClosedStream is returned when attempting to write to a stream that has already been closed.
 )
 
 const (
@@ -309,14 +309,14 @@ func (s *Connection) Ping() (time.Duration, error) {
 }
 
 // Serve handles frames sent from the server, including reply frames
-// which are needed to fully initiate connections.  Both clients and servers
+// which are needed to fully initiate connections. Both clients and servers
 // should call Serve in a separate goroutine before creating streams.
 func (s *Connection) Serve(newHandler StreamHandler) {
 	// use a WaitGroup to wait for all frames to be drained after receiving
 	// go-away.
 	var wg sync.WaitGroup
 
-	// Parition queues to ensure stream frames are handled
+	// Partition queues to ensure stream frames are handled
 	// by the same worker, ensuring order is maintained
 	frameQueues := make([]*PriorityFrameQueue, FRAME_WORKERS)
 	for i := 0; i < FRAME_WORKERS; i++ {
@@ -666,9 +666,9 @@ func (s *Connection) remoteStreamFinish(stream *Stream) {
 }
 
 // CreateStream creates a new spdy stream using the parameters for
-// creating the stream frame.  The stream frame will be sent upon
+// creating the stream frame. The stream frame will be sent upon
 // calling this function, however this function does not wait for
-// the reply frame.  If waiting for the reply is desired, use
+// the reply frame. If waiting for the reply is desired, use
 // the stream Wait or WaitTimeout function on the stream returned
 // by this function.
 func (s *Connection) CreateStream(headers http.Header, parent *Stream, fin bool) (*Stream, error) {
@@ -762,7 +762,8 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 	close(s.shutdownChan)
 }
 
-// Closes spdy connection by sending GoAway frame and initiating shutdown
+// Close closes the spdy connection by sending a [spdy.GoAwayFrame] frame
+// with status [spdy.GoAwayOK] and initiating shutdown.
 func (s *Connection) Close() error {
 	s.receiveIdLock.Lock()
 	if s.goneAway {
@@ -792,7 +793,7 @@ func (s *Connection) Close() error {
 }
 
 // CloseWait closes the connection and waits for shutdown
-// to finish.  Note the underlying network Connection
+// to finish. Note the underlying network Connection
 // is not closed until the end of shutdown.
 func (s *Connection) CloseWait() error {
 	closeErr := s.Close()
@@ -807,11 +808,11 @@ func (s *Connection) CloseWait() error {
 }
 
 // Wait waits for the connection to finish shutdown or for
-// the wait timeout duration to expire.  This needs to be
-// called either after Close has been called or the GOAWAYFRAME
-// has been received.  If the wait timeout is 0, this function
-// will block until shutdown finishes.  If wait is never called
-// and a shutdown error occurs, that error will be logged as an
+// the wait timeout duration to expire. This needs to be
+// called either after Close has been called or the GOAWAY frame
+// has been received. If the wait timeout is 0, this function
+// blocks until shutdown finishes. If wait is never called
+// and a shutdown error occurs, that error is logged as an
 // unhandled error.
 func (s *Connection) Wait(waitTimeout time.Duration) error {
 	var timeout <-chan time.Time
@@ -833,9 +834,9 @@ func (s *Connection) Wait(waitTimeout time.Duration) error {
 }
 
 // NotifyClose registers a channel to be called when the remote
-// peer inidicates connection closure.  The last stream to be
-// received by the remote will be sent on the channel.  The notify
-// timeout will determine the duration between go away received
+// peer indicates connection closure. The last stream to be
+// received by the remote will be sent on the channel. The notify
+// timeout determines the duration between go away received
 // and the connection being closed.
 func (s *Connection) NotifyClose(c chan<- *Stream, timeout time.Duration) {
 	s.goAwayTimeout = timeout
@@ -844,7 +845,7 @@ func (s *Connection) NotifyClose(c chan<- *Stream, timeout time.Duration) {
 
 // SetCloseTimeout sets the amount of time close will wait for
 // streams to finish before terminating the underlying network
-// connection.  Setting the timeout to 0 will cause close to
+// connection. Setting the timeout to 0 will cause close to
 // wait forever, which is the default.
 func (s *Connection) SetCloseTimeout(timeout time.Duration) {
 	s.closeTimeout = timeout

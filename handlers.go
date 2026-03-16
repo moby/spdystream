@@ -46,7 +46,7 @@ func MirrorStreamHandler(stream *Stream) {
 	}()
 }
 
-// NoopStreamHandler does nothing when stream connects.
+// NoOpStreamHandler does nothing when stream connects.
 func NoOpStreamHandler(stream *Stream) {
 	stream.SendReply(http.Header{}, false)
 }

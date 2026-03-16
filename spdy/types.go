@@ -51,7 +51,7 @@ const (
 // MaxDataLength is the maximum number of bytes that can be stored in one frame.
 const MaxDataLength = 1<<24 - 1
 
-// headerValueSepator separates multiple header values.
+// headerValueSeparator separates multiple header values.
 const headerValueSeparator = "\x00"
 
 // Frame is a single SPDY frame in its unpacked in-memory representation. Use
@@ -129,7 +129,7 @@ const (
 	FlagSettingsPersisted    SettingsFlag = 0x2
 )
 
-// SettingsFlag represents the id of an id/value pair in a SETTINGS frame.
+// SettingsId represents the id of an id/value pair in a SETTINGS frame.
 type SettingsId uint32
 
 const (
@@ -205,7 +205,7 @@ type DataFrame struct {
 	Data     []byte // payload data of this frame
 }
 
-// A SPDY specific error.
+// ErrorCode represents a SPDY specific error.
 type ErrorCode string
 
 const (
