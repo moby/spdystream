@@ -81,7 +81,7 @@ func TestSpdyStreams(t *testing.T) {
 	}
 
 	headers := http.Header{
-		"TestKey": []string{"TestVal"},
+		"Test-Key": []string{"TestVal"},
 	}
 	sendErr := stream.SendHeader(headers, false)
 	if sendErr != nil {
@@ -94,7 +94,7 @@ func TestSpdyStreams(t *testing.T) {
 	if len(receiveHeaders) != 1 {
 		t.Fatalf("Unexpected number of headers:\nActual: %d\nExpecting:%d", len(receiveHeaders), 1)
 	}
-	testVal := receiveHeaders.Get("TestKey")
+	testVal := receiveHeaders.Get("Test-Key")
 	if testVal != "TestVal" {
 		t.Fatalf("Wrong test value:\nActual: %q\nExpecting: %q", testVal, "TestVal")
 	}
@@ -856,10 +856,11 @@ func TestFramingAfterRemoteConnectionClosed(t *testing.T) {
 	rt := &roundTripper{}
 	client := &http.Client{Transport: rt}
 
-	_, err = client.Do(req)
+	r, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error from client.Do: %s", err)
 	}
+	defer func() { _ = r.Body.Close() }()
 
 	conn, err := NewConnection(rt.conn, false)
 	if err != nil {
