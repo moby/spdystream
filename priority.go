@@ -87,7 +87,7 @@ func (q *PriorityFrameQueue) Push(frame spdy.Frame, priority uint8) {
 		priority: priority,
 		insertId: q.nextInsertId,
 	}
-	q.nextInsertId = q.nextInsertId + 1
+	q.nextInsertId++
 	heap.Push(q.queue, pFrame)
 	q.c.Signal()
 }

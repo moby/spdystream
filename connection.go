@@ -277,9 +277,9 @@ func (s *Connection) Ping() (time.Duration, error) {
 	pid := s.pingId
 	s.pingLock.Lock()
 	if s.pingId > 0x7ffffffe {
-		s.pingId = s.pingId - 0x7ffffffe
+		s.pingId -= 0x7ffffffe
 	} else {
-		s.pingId = s.pingId + 2
+		s.pingId += 2
 	}
 	pingChan := make(chan error)
 	s.pingChans[pid] = pingChan
@@ -929,7 +929,7 @@ func (s *Connection) getNextStreamId() spdy.StreamId {
 	if sid > 0x7fffffff {
 		return 0
 	}
-	s.nextStreamId = s.nextStreamId + 2
+	s.nextStreamId += 2
 	return sid
 }
 
