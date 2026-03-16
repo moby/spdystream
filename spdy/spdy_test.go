@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/base64"
+	"errors"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -575,7 +576,7 @@ func TestReadMalformedZlibHeader(t *testing.T) {
 			t.Fatalf("NewFramer: %v", err)
 		}
 		_, err = reader.ReadFrame()
-		if err != zlib.ErrHeader {
+		if !errors.Is(err, zlib.ErrHeader) {
 			t.Errorf("Frame %s, expected: %#v, actual: %#v", name, zlib.ErrHeader, err)
 		}
 	}
@@ -641,7 +642,8 @@ func checkZeroStreamId(t *testing.T, frame string, method string, err error) {
 		t.Errorf("%s ZeroStreamId, no error on %s", method, frame)
 		return
 	}
-	eerr, ok := err.(*Error)
+	eerr := &Error{}
+	ok := errors.As(err, &eerr)
 	if !ok || eerr.Err != ZeroStreamId {
 		t.Errorf("%s ZeroStreamId, incorrect error %#v, frame %s", method, eerr, frame)
 	}

@@ -126,7 +126,7 @@ func TestSpdyStreams(t *testing.T) {
 	}
 
 	n, readErr = stream.Read(buf)
-	if readErr != io.EOF {
+	if !errors.Is(readErr, io.EOF) {
 		t.Fatalf("Expected EOF reading from finished stream, read %d bytes", n)
 	}
 
@@ -135,7 +135,7 @@ func TestSpdyStreams(t *testing.T) {
 	if streamCloseErr == nil {
 		t.Fatalf("No error closing finished stream")
 	}
-	if streamCloseErr != ErrWriteClosedStream {
+	if !errors.Is(streamCloseErr, ErrWriteClosedStream) {
 		t.Fatalf("Unexpected error closing stream: %s", streamCloseErr)
 	}
 
@@ -154,7 +154,7 @@ func TestSpdyStreams(t *testing.T) {
 	if waitErr == nil {
 		t.Fatalf("Did not receive error creating stream")
 	}
-	if waitErr != ErrReset {
+	if !errors.Is(waitErr, ErrReset) {
 		t.Fatalf("Unexpected error creating stream: %s", waitErr)
 	}
 	streamCloseErr = badStream.Close()
@@ -340,7 +340,7 @@ func TestUnexpectedRemoteConnectionClosed(t *testing.T) {
 		}
 
 		e := <-streamch
-		if e == nil || e != io.EOF {
+		if e == nil || !errors.Is(e, io.EOF) {
 			t.Fatalf("(%d) Expected to get an EOF stream error", tix)
 		}
 

@@ -345,7 +345,7 @@ Loop:
 	for {
 		readFrame, err := s.framer.ReadFrame()
 		if err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				debugMessage("frame read error: %s", err)
 			} else {
 				debugMessage("(%p) EOF received", s)
