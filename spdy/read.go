@@ -7,6 +7,7 @@ package spdy
 import (
 	"compress/zlib"
 	"encoding/binary"
+	"errors"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -140,7 +141,7 @@ func (f *Framer) uncorkHeaderDecompressor(payloadSize int64) error {
 		return nil
 	}
 	f.headerReader = io.LimitedReader{R: f.r, N: payloadSize}
-	decompressor, err := zlib.NewReaderDict(&f.headerReader, []byte(headerDictionary))
+	decompressor, err := zlib.NewReaderDict(&f.headerReader, headerDictionary)
 	if err != nil {
 		return err
 	}
@@ -275,7 +276,7 @@ func (f *Framer) readSynStreamFrame(h ControlFrameHeader, frame *SynStreamFrame)
 		reader = f.headerDecompressor
 	}
 	frame.Headers, err = f.parseHeaderValueBlock(reader, frame.StreamId)
-	if !f.headerCompressionDisabled && (err == io.EOF && f.headerReader.N == 0 || f.headerReader.N != 0) {
+	if !f.headerCompressionDisabled && ((errors.Is(err, io.EOF) && f.headerReader.N == 0) || f.headerReader.N != 0) {
 		err = &Error{WrongCompressedPayloadSize, 0}
 	}
 	if err != nil {
@@ -307,7 +308,7 @@ func (f *Framer) readSynReplyFrame(h ControlFrameHeader, frame *SynReplyFrame) e
 		reader = f.headerDecompressor
 	}
 	frame.Headers, err = f.parseHeaderValueBlock(reader, frame.StreamId)
-	if !f.headerCompressionDisabled && (err == io.EOF && f.headerReader.N == 0 || f.headerReader.N != 0) {
+	if !f.headerCompressionDisabled && ((errors.Is(err, io.EOF) && f.headerReader.N == 0) || f.headerReader.N != 0) {
 		err = &Error{WrongCompressedPayloadSize, 0}
 	}
 	if err != nil {
@@ -339,7 +340,7 @@ func (f *Framer) readHeadersFrame(h ControlFrameHeader, frame *HeadersFrame) err
 		reader = f.headerDecompressor
 	}
 	frame.Headers, err = f.parseHeaderValueBlock(reader, frame.StreamId)
-	if !f.headerCompressionDisabled && (err == io.EOF && f.headerReader.N == 0 || f.headerReader.N != 0) {
+	if !f.headerCompressionDisabled && ((errors.Is(err, io.EOF) && f.headerReader.N == 0) || f.headerReader.N != 0) {
 		err = &Error{WrongCompressedPayloadSize, 0}
 	}
 	if err != nil {

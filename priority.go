@@ -47,7 +47,11 @@ func (fq frameQueue) Swap(i, j int) {
 }
 
 func (fq *frameQueue) Push(x interface{}) {
-	*fq = append(*fq, x.(*prioritizedFrame))
+	pf, ok := x.(*prioritizedFrame)
+	if !ok || pf == nil {
+		panic("frameQueue.Push: unexpected value")
+	}
+	*fq = append(*fq, pf)
 }
 
 func (fq *frameQueue) Pop() interface{} {
@@ -87,7 +91,7 @@ func (q *PriorityFrameQueue) Push(frame spdy.Frame, priority uint8) {
 		priority: priority,
 		insertId: q.nextInsertId,
 	}
-	q.nextInsertId = q.nextInsertId + 1
+	q.nextInsertId++
 	heap.Push(q.queue, pFrame)
 	q.c.Signal()
 }
@@ -101,7 +105,12 @@ func (q *PriorityFrameQueue) Pop() spdy.Frame {
 		}
 		q.c.Wait()
 	}
-	frame := heap.Pop(q.queue).(*prioritizedFrame).frame
+	var frame spdy.Frame
+	f, ok := heap.Pop(q.queue).(*prioritizedFrame)
+	if !ok || f == nil {
+		panic("PriorityFrameQueue.Pop: unexpected value")
+	}
+	frame = f.frame
 	q.c.Signal()
 	return frame
 }

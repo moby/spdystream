@@ -62,9 +62,12 @@ func TestPriorityQueueOrdering(t *testing.T) {
 	}
 
 	for i := spdy.StreamId(0); i < 150; i++ {
-		frame := queue.Pop()
-		if frame.(*spdy.DataFrame).StreamId != i {
-			t.Fatalf("Wrong frame\nActual: %d\nExpecting: %d", frame.(*spdy.DataFrame).StreamId, i)
+		frame, ok := queue.Pop().(*spdy.DataFrame)
+		if !ok || frame == nil {
+			t.Fatal("Wrong frame type")
+		}
+		if frame.StreamId != i {
+			t.Fatalf("Wrong frame\nActual: %d\nExpecting: %d", frame.StreamId, i)
 		}
 	}
 }
@@ -85,9 +88,12 @@ func TestPriorityQueueSync(t *testing.T) {
 
 	wg.Wait()
 	for i := spdy.StreamId(0); i < 150; i++ {
-		frame := queue.Pop()
-		if frame.(*spdy.DataFrame).StreamId != i {
-			t.Fatalf("Wrong frame\nActual: %d\nExpecting: %d", frame.(*spdy.DataFrame).StreamId, i)
+		frame, ok := queue.Pop().(*spdy.DataFrame)
+		if !ok || frame == nil {
+			t.Fatal("Wrong frame type")
+		}
+		if frame.StreamId != i {
+			t.Fatalf("Wrong frame\nActual: %d\nExpecting: %d", frame.StreamId, i)
 		}
 	}
 }

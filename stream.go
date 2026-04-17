@@ -28,9 +28,9 @@ import (
 	"github.com/moby/spdystream/spdy"
 )
 
-var (
-	ErrUnreadPartialData = errors.New("unread partial data")
-)
+// ErrUnreadPartialData is returned by ReadData when it is called while there is
+// still unread data buffered from a previous Read call.
+var ErrUnreadPartialData = errors.New("unread partial data")
 
 type Stream struct {
 	streamId  spdy.StreamId
@@ -85,7 +85,7 @@ func (s *Stream) Write(data []byte) (n int, err error) {
 	if err == nil {
 		n = len(data)
 	}
-	return
+	return n, err
 }
 
 // Read reads bytes from a stream, a single read will never get more
@@ -109,12 +109,12 @@ func (s *Stream) Read(p []byte) (n int, err error) {
 	} else {
 		s.unread = nil
 	}
-	return
+	return n, nil
 }
 
 // ReadData reads an entire data frame and returns the byte array
-// from the data frame.  If there is unread data from the result
-// of a Read call, this function will return an ErrUnreadPartialData.
+// from the data frame. If there is unread data from the result
+// of a Read call, this function returns an [ErrUnreadPartialData].
 func (s *Stream) ReadData() ([]byte, error) {
 	debugMessage("(%p) Reading data from %d", s, s.streamId)
 	if s.unread != nil {
@@ -147,7 +147,7 @@ func (s *Stream) Wait() error {
 }
 
 // WaitTimeout waits for the stream to receive a reply or for timeout.
-// When the timeout is reached, ErrTimeout will be returned.
+// If the timeout is reached, [ErrTimeout] is returned.
 func (s *Stream) WaitTimeout(timeout time.Duration) error {
 	var timeoutChan <-chan time.Time
 	if timeout > time.Duration(0) {
@@ -247,7 +247,7 @@ func (s *Stream) SendReply(headers http.Header, fin bool) error {
 }
 
 // Refuse sends a reset frame with the status refuse, only
-// valid to be called once when handling a new stream.  This
+// valid to be called once when handling a new stream. This
 // may be used to indicate that a stream is not allowed
 // when http status codes are not being used.
 func (s *Stream) Refuse() error {
@@ -266,7 +266,7 @@ func (s *Stream) Cancel() error {
 }
 
 // ReceiveHeader receives a header sent on the other side
-// of the stream.  This function will block until a header
+// of the stream. This function will block until a header
 // is received or stream is closed.
 func (s *Stream) ReceiveHeader() (http.Header, error) {
 	select {
@@ -274,11 +274,11 @@ func (s *Stream) ReceiveHeader() (http.Header, error) {
 		break
 	case header, ok := <-s.headerChan:
 		if !ok {
-			return nil, fmt.Errorf("header chan closed")
+			return nil, errors.New("header chan closed")
 		}
 		return header, nil
 	}
-	return nil, fmt.Errorf("stream closed")
+	return nil, errors.New("stream closed")
 }
 
 // Parent returns the parent stream

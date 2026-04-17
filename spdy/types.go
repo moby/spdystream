@@ -63,7 +63,7 @@ const (
 	defaultMaxHeaderCount     uint32 = 1000
 )
 
-// headerValueSepator separates multiple header values.
+// headerValueSeparator separates multiple header values.
 const headerValueSeparator = "\x00"
 
 // Frame is a single SPDY frame in its unpacked in-memory representation. Use
@@ -141,7 +141,7 @@ const (
 	FlagSettingsPersisted    SettingsFlag = 0x2
 )
 
-// SettingsFlag represents the id of an id/value pair in a SETTINGS frame.
+// SettingsId represents the id of an id/value pair in a SETTINGS frame.
 type SettingsId uint32
 
 const (
@@ -217,7 +217,7 @@ type DataFrame struct {
 	Data     []byte // payload data of this frame
 }
 
-// A SPDY specific error.
+// ErrorCode represents a SPDY specific error.
 type ErrorCode string
 
 const (
@@ -268,9 +268,9 @@ type Framer struct {
 	headerReader              io.LimitedReader
 	headerDecompressor        io.ReadCloser
 
-	maxFrameLength       uint32 // overrides the default frame payload length limit.
-	maxHeaderFieldSize   uint32 // overrides the default per-header name/value length limit.
-	maxHeaderCount       uint32 // overrides the default header count limit.
+	maxFrameLength     uint32 // overrides the default frame payload length limit.
+	maxHeaderFieldSize uint32 // overrides the default per-header name/value length limit.
+	maxHeaderCount     uint32 // overrides the default header count limit.
 }
 
 // NewFramer allocates a new Framer for a given SPDY connection, represented by
@@ -289,7 +289,7 @@ func NewFramerWithOptions(w io.Writer, r io.Reader, opts ...FramerOption) (*Fram
 
 func newFramer(w io.Writer, r io.Reader, opts ...FramerOption) (*Framer, error) {
 	compressBuf := new(bytes.Buffer)
-	compressor, err := zlib.NewWriterLevelDict(compressBuf, zlib.BestCompression, []byte(headerDictionary))
+	compressor, err := zlib.NewWriterLevelDict(compressBuf, zlib.BestCompression, headerDictionary)
 	if err != nil {
 		return nil, err
 	}
