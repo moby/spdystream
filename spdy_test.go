@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1002,6 +1003,152 @@ func TestGoAwayRace(t *testing.T) {
 	close(processDataFrame)
 
 	done.Wait()
+}
+
+func TestReceiveBufferIsDrained(t *testing.T) {
+	// 1. Server sends data until tcp window is full
+	// 2. Server closes stream and connection
+	// 3. Client starts reading and in between reads sends a ping
+
+	// When the ping hits the server side while there is still data in the
+	// kernel send buffer, the kernel will respond with an RST and discard the
+	// remaining data.
+
+	// Start listener
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("Error listening: %v", err)
+	}
+	defer listener.Close()
+	addr := listener.Addr().String()
+	t.Logf("Listening on: %s", addr)
+
+	// Set up the client side
+	clientTcpConn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("Error dialing server: %s", err)
+	}
+	clientSpdyConn, err := NewConnection(clientTcpConn, false)
+	if err != nil {
+		t.Fatalf("Error creating spdy connection: %s", err)
+	}
+	go clientSpdyConn.Serve(NoOpStreamHandler)
+
+	// Set up the server side
+	serverStreamCh := make(chan *Stream, 1)
+	serverTcpConn, err := listener.Accept()
+	if err != nil {
+		t.Fatalf("Error accepting connection: %v", err)
+	}
+	serverSpdyConn, err := NewConnection(serverTcpConn, true) // spdy takes ownership of conn
+	if err != nil {
+		t.Fatalf("Error creating server connection: %v", err)
+	}
+	go serverSpdyConn.Serve(func(str *Stream) {
+		str.SendReply(http.Header{}, false)
+		serverStreamCh <- str
+	})
+
+	// Connect a client stream...
+	clientStream, err := clientSpdyConn.CreateStream(http.Header{}, nil, true)
+	if err != nil {
+		t.Fatalf("Error creating client stream: %v", err)
+	}
+	clientStream.Wait() // wait for reply
+
+	// ... and wait for it on the server side
+	serverStream := <-serverStreamCh
+
+	// Fill stream until backpressure occurs
+	var bytesWritten uint64
+	var writingDone int32
+	var writerWg sync.WaitGroup
+	writerWg.Add(1)
+	go func() {
+		defer writerWg.Done()
+		buf := make([]byte, 1024)
+		for atomic.LoadInt32(&writingDone) == 0 {
+			n, err := serverStream.Write(buf)
+			atomic.AddUint64(&bytesWritten, uint64(n))
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait until writer starts
+	for atomic.LoadUint64(&bytesWritten) == 0 {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Wait until writer stalls
+	last := atomic.LoadUint64(&bytesWritten)
+	for {
+		time.Sleep(100 * time.Millisecond)
+		if last == atomic.LoadUint64(&bytesWritten) {
+			break
+		}
+		last = atomic.LoadUint64(&bytesWritten)
+	}
+	atomic.StoreInt32(&writingDone, 1)
+
+	go func() {
+		// Close the server side
+		if err := serverStream.Close(); err != nil {
+			t.Errorf("Error closing stream: %v", err)
+		}
+		if err := serverStream.Reset(); err != nil {
+			t.Errorf("Error resetting stream: %v", err)
+		}
+		if err := serverSpdyConn.Close(); err != nil {
+			t.Errorf("Error closing spdy conn")
+		}
+	}()
+
+	// Start sending pings
+	stopPings := make(chan struct{})
+	defer close(stopPings)
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		var wg sync.WaitGroup
+		for {
+			select {
+			case <-ticker.C:
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_, _ = clientSpdyConn.Ping()
+				}()
+			case <-stopPings:
+				wg.Wait()
+				return
+			}
+		}
+	}()
+
+	// Start reading
+	var bytesRead uint64
+	buf := make([]byte, 1024)
+	for {
+		time.Sleep(1 * time.Millisecond) // slow reader — keeps server send buffer non-empty
+		n, err := clientStream.Read(buf)
+		bytesRead += uint64(n)
+		if err != nil {
+			if err != io.EOF {
+				t.Logf("read stopped early (possible RST): %v", err)
+			}
+			break
+		}
+	}
+	_ = clientStream.Close()
+	writerWg.Wait()
+
+	if bytesRead != atomic.LoadUint64(&bytesWritten) {
+		t.Errorf("Read less bytes than written: written: %d, read: %d", atomic.LoadUint64(&bytesWritten), bytesRead)
+	} else {
+		t.Logf("Successfully read all bytes: %d", bytesRead)
+	}
 }
 
 func TestSetIdleTimeoutAfterRemoteConnectionClosed(t *testing.T) {
