@@ -280,8 +280,8 @@ func NewConnectionWithOptions(conn net.Conn, server bool, opts ...spdy.FramerOpt
 // Ping sends a ping frame across the connection and
 // returns the response time
 func (s *Connection) Ping() (time.Duration, error) {
-	pid := s.pingId
 	s.pingLock.Lock()
+	pid := s.pingId
 	if s.pingId > 0x7ffffffe {
 		s.pingId = s.pingId - 0x7ffffffe
 	} else {
@@ -740,7 +740,43 @@ func (s *Connection) shutdown(closeTimeout time.Duration) {
 	var err error
 	select {
 	case <-streamsClosed:
-		// No active streams, close should be safe
+		// No active streams; now drain inbound traffic before closing so the
+		// kernel sees FIN, not RST. Background: If a peer packet (e.g. a SPDY
+		// PING) arrives at our socket after Close(), the kernel responds with
+		// RST and discards anything still queued in OUR kernel send buffer.
+		//
+		// Half-closing the write end of the connection triggers a FIN once the
+		// send buffer is emptied and prevents new packets from being sent, but
+		// still allows the receive buffer to be drained.
+		func() {
+			cw, ok := s.conn.(interface{ CloseWrite() error })
+			if !ok {
+				debugMessage("(%p) connection does not support half-close, skipping drain", s)
+				return
+			}
+			if err := cw.CloseWrite(); err != nil {
+				debugMessage("(%p) failed to half-close connection: %s", s, err)
+				return
+			}
+			var drainTimeout <-chan time.Time
+			if closeTimeout == time.Duration(0) {
+				// no close timeout configured; use fixed drain timeout to avoid
+				// hanging if peer does not respond or Serve() was not called
+				drainTimer := time.NewTimer(10 * time.Second)
+				defer drainTimer.Stop()
+				drainTimeout = drainTimer.C
+			}
+			select {
+			case <-s.closeChan:
+				return
+			case <-timeout:
+				debugMessage("(%p) close timeout reached", s)
+				return
+			case <-drainTimeout:
+				debugMessage("(%p) drain timeout reached", s)
+				return
+			}
+		}()
 		err = s.conn.Close()
 	case <-timeout:
 		// Force ungraceful close
